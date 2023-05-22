@@ -19,8 +19,17 @@ def read_in_csv(mv_file, annotations_file):
     timeseries of a heartbeat, followed by the annotations of the heartbeat. The time series consists of a list of
     tuples with two values, one for each channel.
     """
+    # mv_readings structure: #sample, Signal reading 1, Signal reading 2
+    # there are 650k samples.
     mv_readings = pd.read_csv(mv_file)
-    annotations = pd.read_csv(annotations_file)
+
+    # annotations structure: Time   Sample #  Type  Sub Chan  Num
+    # there are 2275 annotations.
+    annotations_cols = ['Time', 'Sample', 'Type', 'Sub', 'Chan', 'Num']
+    annotations = pd.read_csv(annotations_file, usecols=annotations_cols)
+    # the last 3 columns are not needed, so we need a new df with only the first 3 columns
+    annotations = annotations.iloc[:, :3]
+
     train_data = []
     upper_bound = 0
     lower_bound = 0
@@ -71,22 +80,11 @@ def plot_class_distribution(plot_data):
 
 
 def main():
-    # df structure: #sample, Signal reading 1, Signal reading 2
-    # there are 650k samples.
+
     mv_file = '100.csv'
     annotation_file = '100annotations.csv'
 
-    print(mvReadings.head())
-
-    # annotations structure: Time   Sample #  Type  Sub Chan  Num
-    # there are 2275 annotations.
-    annotation_cols = ['Time', 'Sample', 'Type', 'Sub', 'Chan', 'Num']
-    annotations = pd.read_csv('100annotations.csv', usecols=annotation_cols)
-
-    # the last 3 columns are not needed, so we need a new df with only the first 3 columns
-    annotations = annotations.iloc[:, :3]
-
-    train_data = read_in_csv(mvReadings, annotations)
+    train_data = read_in_csv(mv_file, annotation_file)
 
     plot_data = count_classe_instances(train_data)
     plot_class_distribution(plot_data)
