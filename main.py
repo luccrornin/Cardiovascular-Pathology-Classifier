@@ -276,7 +276,6 @@ def main():
     y = test.generate_neurons(Ny)
 
     # ------------------------------------------------------------------------------------------------------------------
-    # This is the portion of code for training the ESN model.
 
 
 if __name__ == '__main__':

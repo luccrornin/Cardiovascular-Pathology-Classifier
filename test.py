@@ -205,6 +205,7 @@ def main():
     # TODO 3: Implement the necessary achitecture for the readout layer of the ESN model. (i.e. the output weights)
     # TODO 4: Implement the necessary architecture for the training of the ESN model maybe in a class though.
     # TODO 5: Investigate the reservoir dynamics of the ESN model using the training data.
+    # TODO 6: Look into the different methods for training the ESN model.
 
 
 if __name__ == '__main__':
