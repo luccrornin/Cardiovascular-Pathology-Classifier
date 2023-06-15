@@ -51,8 +51,7 @@ def old_read_in_csv(mv_file, annotations_file):
     """
     # mv_readings structure: #sample, Signal reading 1, Signal reading 2
     # there are 650k samples.
-    buttery_df = buter(mv_file)  # This is the filtered data, using the butterworth filter.
-    mv_readings = pd.read_csv(mv_file)
+    buttery_mv_df = buter(mv_file)  # This is the filtered data, using the butterworth filter.
 
     # annotations structure: Time   Sample #  Type  Sub Chan  Num
     # there are 2275 annotations.
@@ -77,7 +76,7 @@ def old_read_in_csv(mv_file, annotations_file):
 
         # Run through the mv readings and append the readings to the sample_row_x as tuples of (channel 1, channel 2)
         for j in range(lower_bound, upper_bound):
-            sample_row_x.append((buttery_df[j][1], buttery_df[j][2]))
+            sample_row_x.append((buttery_mv_df[j][1], buttery_mv_df[j][2]))
 
         train_data.append([sample_row_x, sample_row_y])
         lower_bound = upper_bound + 1
@@ -155,6 +154,7 @@ def compare(new_seq, label, old):
     print("The values match and labels match.")
 
 
+# todo: need to change function so it works with current data structure. Only works with old data structure.
 def split_into_types(data, heartbeat_types):
     """
     This function splits the data into the different types of heartbeats.
@@ -228,6 +228,7 @@ def get_avg_seq_length(train_data):
 
 
 def main():
+    # -------------------------------------------- Data Preprocessing --------------------------------------------------
     mv_file = '201.csv'
     annotation_file = '201annotations.csv'
     # the old read in csv function has the target labels in it as well.
@@ -244,8 +245,8 @@ def main():
     class_split_df = split_into_types(train_data, heartbeat_types)
     # plot_class_distribution(plot_data, heartbeat_types)
 
-    # ------------------------------------------------------------------------------------------------------------------
-    # This is the portion of code for building the ESN model.
+    # --------------------------------------------Building the ESN model------------------------------------------------
+    # This is the portion of code for .
 
     Nx = 500
     Nu = 2
@@ -256,26 +257,13 @@ def main():
     big_bound = 1
     # rescale_factor = 0.4
 
-    # create the input weight matrix w_in
-    w_in = test.generate_sparse_weights(Nx, Nu, sparseness, little_bound, big_bound)
+    esn = test.ESN(Nx, Nu, Ny, sparseness, alpha, little_bound, big_bound)
+    esn.timeseries_activation_plot(train_data[0], 16)
+    # --------------------------------------------Operating the ESN model-----------------------------------------------
 
-    # Generate the sparse matrix of weights for the reservoir (W).
-    sparse_matrix = test.generate_hidden_matrix(Nx, sparseness, little_bound, big_bound)
-    # Calculate the spectral radius of the reservoir weights.
-    spectral_radius = test.get_spectral_radius(sparse_matrix)
-    # rescale the weights
-    w = sparse_matrix / spectral_radius
+    # esn.train_state(train_data[0])
 
-    # Generate the initial state of the reservoir.
-    x = test.generate_neurons(Nx)
-
-    # Generate the weights for the output layer of the ESN model.
-    w_out = test.generate_sparse_weights(Nx, Ny, sparseness, little_bound, big_bound)
-
-    # Generate the units for the output layer of the ESN model.
-    y = test.generate_neurons(Ny)
-
-    # ------------------------------------------------------------------------------------------------------------------
+    # Existing matrix of size (500, 2)
 
 
 if __name__ == '__main__':
