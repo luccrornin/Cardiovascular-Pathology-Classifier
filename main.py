@@ -251,14 +251,15 @@ def main():
     Nx = 500
     Nu = 2
     Ny = 10
-    alpha = 0.3
+    alpha = 0.2
     sparseness = 0.1
     little_bound = -1
     big_bound = 1
     # rescale_factor = 0.4
 
     esn = test.ESN(Nx, Nu, Ny, sparseness, alpha, little_bound, big_bound)
-    esn.timeseries_activation_plot(train_data[0], 16)
+    # esn.get_readout()
+    esn.timeseries_activation_plot(train_data[0], 4)
     # --------------------------------------------Operating the ESN model-----------------------------------------------
 
     # esn.train_state(train_data[0])

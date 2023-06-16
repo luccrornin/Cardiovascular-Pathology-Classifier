@@ -44,7 +44,7 @@ class ESN:
         placeholder_w_in = self.generate_sparse_matrix(self.n_x, self.n_u)  # 500 x 2
         self.w_in = placeholder_w_in[0]  # 500 x 2, the third is the bias column full of ones.
         self.w_in_non_zero = placeholder_w_in[1]  # 500 x 2
-        placeholder_w_out = self.generate_sparse_matrix(self.n_x, self.n_y)
+        placeholder_w_out = self.generate_sparse_matrix(self.n_y, self.n_x)
         self.w_out = placeholder_w_out[0]
         self.w_out_non_zero = placeholder_w_out[1]
         self.x = self.generate_neurons(self.n_x)  # n_x x 1
@@ -180,7 +180,10 @@ class ESN:
 
         # Calculate the update of the state.
         # print(f'w_in shape should be 500x3: {w_in_with_bias.shape} and the input should be 3x1: {u_with_bias.shape}')
-        x_update = np.tanh(np.dot(w_in_with_bias, u_with_bias) + np.dot(self.w, transpose))
+        lhs = np.matmul(w_in_with_bias, u_with_bias)
+        rhs = np.matmul(self.w, transpose)
+        x_update = np.tanh(lhs + rhs)
+        # x_update = np.tanh(np.dot(w_in_with_bias, u_with_bias) + np.dot(self.w, transpose))
 
         # Calculate the state.
         x = (1 - self.alpha) * transpose + self.alpha * x_update  # muahahahahaha i think it's gonnnna work!!!! :D
@@ -189,6 +192,18 @@ class ESN:
             raise Exception('The state of the reservoir is not the correct shape.')
         else:
             self.set_x(x)
+
+    # todo: include the bias if needed.
+    def get_readout(self):
+        """
+        This function calculates the readout from the ESN
+        The equation for the readout is: y(n) = w_out*[1;x(n)]
+        :return: None, the readout is stored in the y attribute.
+        """
+        print(f'w_out shape: {self.w_out.shape}')
+        print(f'x shape: {self.x.shape}')
+        transpose = self.x.reshape((self.n_x, 1))
+        self.y = np.matmul(self.w_out, transpose)
 
     def timeseries_activation_plot(self, u, num_neurons):
         """
@@ -309,20 +324,21 @@ def main():
     Nu = 2
     Ny = 10
     sparseness = 0.1
-    little_bound = -1
-    big_bound = 1
+    little_bound = -0.5
+    big_bound = 0.5
     alpha = 0.3
     # rescale_factor = 0.4
 
     # Generate the ESN model.
     esn = ESN(Nx, Nu, Ny, sparseness, alpha, little_bound, big_bound)
 
-    # TODO 1: go onto the input scaling part of building the reservoir for the ESN model.
-    # TODO 2: Compare the two methods for generating sparse matrices, and evaluate their spectral radi.
-    # TODO 3: Implement the necessary achitecture for the readout layer of the ESN model. (i.e. the output weights)
-    # TODO 4: Implement the necessary architecture for the training of the ESN model maybe in a class though.
-    # TODO 5: Investigate the reservoir dynamics of the ESN model using the training data.
-    # TODO 6: Look into the different methods for training the ESN model.
+    # TODO 1: Investigate the reservoir dynamics of the ESN model using the training data.
+    # TODO 2: Create a method to calculate the output weights of the ESN model.
+    # TODO 2.1: Create a linear regression model to calculate the output weights. No regularization. But easiest.
+    # TODO 2.2: Create a ridge regression model to calculate the output weights. yes regularization. But harder.
+    # TODO 3: Create a method to carry out k-fold cross validation on the ESN model.
+
+    # TODO potential : go onto the input scaling part of building the reservoir for the ESN model.
 
 
 if __name__ == '__main__':
