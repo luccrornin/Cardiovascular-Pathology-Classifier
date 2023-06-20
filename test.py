@@ -109,6 +109,10 @@ class ESN:
         """
         # Generate a random vector of size n_x.
         x = np.random.uniform(self.lower_bound, self.upper_bound, num_neurons)
+        x = np.reshape(x, (num_neurons, 1))  # n_x x 1
+        # TODO - Check out if the initilization of the reservoir to zeros is better.
+        # x = np.zeros(num_neurons)
+        # print(x.shape)
         # Return the initial state of the reservoir.
         return x
 
@@ -145,10 +149,10 @@ class ESN:
         indices = placeholder[1]
         e = np.linalg.eigvals(w)
         spectral_radius = np.max(np.abs(e))
+        # print(f'\033[31m Spectral Radius: {spectral_radius}')
         w /= spectral_radius
         return w, indices
 
-    # TODO: Investigate this method more to see if it's done correctly, maybe consult with Chat GPT-3.
     def update_state(self, u):
         """
         This function is responsible for updating the state x(n-1) to x(n) of the reservoir .
@@ -222,7 +226,7 @@ class ESN:
             print(f'\033[36m output activations: {self.y}\n')
             return self.y
 
-    def timeseries_activation_plot(self, u, num_neurons, neurons_pp, num_heartbeats, segment_wize=True):
+    def timeseries_activation_plot(self, u, num_neurons, neurons_pp, num_heartbeats, title, segment_wize=True):
         """
         This function is responsible for plotting the activations of the state activations in the reservoir.
         The plots we be used to visualize and gain insight into the temporal dynamics of the reservoir.
@@ -233,13 +237,16 @@ class ESN:
         :param neurons_pp: The number of neurons to be plotted on each plot.
         :param num_heartbeats: This is the number of heartbeats to be fed into the reservoir, the more heartbeats the
         longer the plot will be.
+        :param title: The title of the plot.
         :param segment_wize: Boolean indicating whether the plot should show updates for Heartbeat segment to segment,
         or if it should plot the changes from the pair channels in the heartbeat sequences.
         :return: None
         """
         selected_neurons = np.random.choice(np.arange(self.n_x), num_neurons, replace=False)
-        captured_data = np.empty((num_neurons, len(u)))
-
+        # captured_data = np.empty((num_neurons, len(u)))
+        # Create a list of lists to store the captured data. The number of inner lists is equal to the number of
+        # neurons to be plotted.
+        captured_data = [[] for _ in range(num_neurons)]
         match segment_wize:
 
             case True:
@@ -250,23 +257,26 @@ class ESN:
             case False:
 
                 print("\033[34m Beginning to update reservoir neurons ECG channel pair wize...")
+                print(f'\033[33m The length of the captured data is: {len(captured_data)}')
+
                 for heartbeat in range(num_heartbeats):
                     # this layer will iterate over the different pairs of data points in the input data.
-                    for i in range(len(u[heartbeat])):
+                    for sample in range(len(u[heartbeat])):
                         # this layer will iterate over the different neurons in the reservoir and capture their
                         # activations.
-                        for j in range(num_neurons):
-                            index = selected_neurons[j]
-                            activation = self.x[index]
-                            captured_data[j][i] = activation
+                        for neuron in range(num_neurons):
+                            index = selected_neurons[neuron]
+                            activation = self.x[index][0]
+                            # captured_data[neuron][sample] = activation
+                            captured_data[neuron].append(activation)
 
                         # This update is for every pair, the captured data will reflect the update of the state for
                         # every pair.
-                        sample = np.array(u[heartbeat][i]).T
+                        sample = np.array(u[heartbeat][sample]).T
                         self.update_state(sample)
                 print("\033[36m Completed capturing state activations.\n")
 
-        state_activation_plot(0, neurons_pp, neurons_pp, num_neurons, captured_data, selected_neurons)
+        state_activation_plot(0, neurons_pp, neurons_pp, num_neurons, captured_data, selected_neurons, title)
 
     # ---------------------------Training the reservoir activation states.----------------------------------------------
 
@@ -320,12 +330,15 @@ class ESN:
 
         return readout_activations
 
-    def train_readout(self, harvested_states, y_target):
+    def train_readout(self, harvested_states, y_target, save=False):
         """
         This function is responsible for training the readout weights of the ESN.
+        The output weight matrix resulting from the linear regression will be stored in the w_out attribute and also
+        saved to an .npy file for later use.
         :param harvested_states: The state activations of the reservoir, for each sample in the training data,
         (num_samples, n_x).
         :param y_target: The target output data being a matrix of one hot encodings. (num_samples, num_classes)
+        :param save: Boolean indicating whether the readout weights should be saved to a file.
         :return: None
         """
         reservoir_bias_value = 1
@@ -342,8 +355,9 @@ class ESN:
 
         self.w_out = self.linear_regression.coef_
 
-        # we will now save the weights of the matrix, so that we can use them later for other runs.
-        np.save('w_out.npy', self.w_out)
+        if save:
+            # we will now save the weights of the matrix, so that we can use them later for other runs.
+            np.save('w_out.npy', self.w_out)
 
         # print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
 
@@ -377,7 +391,7 @@ def print_matrix(matrix):
         print('\n\n')
 
 
-def state_activation_plot(start, end, step, stop, captured_data, selected_neurons):
+def state_activation_plot(start, end, step, stop, captured_data, selected_neurons, title):
     """
     This is recursive function that is responsible for plotting the activations of the state activations in the
     reservoir.
@@ -387,28 +401,28 @@ def state_activation_plot(start, end, step, stop, captured_data, selected_neuron
     :param stop: The number of neurons to plot in total.
     :param captured_data: The data that was captured from the reservoir to be plotted.
     :param selected_neurons: The neurons that were selected to be plotted.
+    :param title: The title of the plot.
     :return:
     """
     # print(f'\033[36m The start is: {start} and the end is: {end}, and the stop is: {stop}')
-
     for i in range(start, end):
-        plt.plot(captured_data[i, :], label=f'Neuron {selected_neurons[i]}')
+        plt.plot(captured_data[i], label=f'Neuron {selected_neurons[i]}')
 
     plt.xlabel('Time')
     plt.ylabel('Activation')
-    plt.title('State Activations')
+    plt.title(title)
     plt.legend()
     plt.show()
 
     if end + step <= stop:  # this means that we can plot all 4 neurons on the same graph.
         new_start = end
         end = end + step
-        state_activation_plot(new_start, end, step, stop, captured_data, selected_neurons)
+        state_activation_plot(new_start, end, step, stop, captured_data, selected_neurons, title)
     # the next condition is for when we have less than 4 neurons to plot.
     elif end + step > stop and end != stop:
         new_start = end
         end = stop
-        state_activation_plot(new_start, end, step, stop, captured_data, selected_neurons)
+        state_activation_plot(new_start, end, step, stop, captured_data, selected_neurons, title)
     elif end == stop:
         print('\033[36m Completed plotting the state activations.')
         return
@@ -429,10 +443,11 @@ def output_activation_plot(esn, neuron_index, u):
     plt.show()
 
 
-def plot_input_data(u):
+def plot_input_data(u, title="Input Data"):
     """
     This function is responsible for plotting the input data.
     :param u: The input data. (num_samples, num_channels)
+    :param title: The title of the plot.
     :return: None, just plots the data.
     """
 
@@ -444,12 +459,12 @@ def plot_input_data(u):
 
     # print(channel_1)
 
-    plt.plot(channel_1, label='Channel 1')
-    plt.plot(channel_2, label='Channel 2')
+    plt.plot(channel_1, label='MLII')
+    plt.plot(channel_2, label='V1')
     plt.legend()
     plt.xlabel('Time')
     plt.ylabel('ECG Mv reading')
-    plt.title('Input Data')
+    plt.title(title)
     plt.show()
 
 
@@ -459,7 +474,7 @@ def main():
     The spectral radius currently when not rescaling the weights is 4.2281, this could be a tad high.
     slightly problematic.
     """
-    Nx = 500
+    Nx = 50
     Nu = 2
     Ny = 10
     sparseness = 0.1

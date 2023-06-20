@@ -5,6 +5,24 @@ from scipy.signal import butter, filtfilt
 import test
 
 
+def scale_input(input_data, input_min, input_max, output_min, output_max):
+    """
+    Scale the input data to a specified output range.
+
+    Args:
+        input_data (ndarray): Input data to be scaled.
+        input_min (float): Minimum value of the input data.
+        input_max (float): Maximum value of the input data.
+        output_min (float): Desired minimum value of the output range.
+        output_max (float): Desired maximum value of the output range.
+
+    Returns:
+        ndarray: Scaled input data.
+    """
+    scaled_data = ((input_data - input_min) / (input_max - input_min)) * (output_max - output_min) + output_min
+    return scaled_data
+
+
 def buter(mv_file):
     """
     This function implements a butterworth filter with
@@ -86,7 +104,31 @@ def old_read_in_csv(mv_file, annotations_file):
 
 def read_in_csv(mv_file, annotations_file):
     # So this currently is a numpy matrix with shape (650_000, 3)
+    # The columns will be filtered with a butterworth filter.
     butter_df = buter(mv_file)
+    # something = np.delete(butter_df, 0, axis=1)
+    # something = something[:159 + 1, :]
+    # test.plot_input_data(something, "Filtered Data")
+    # The MV readings now need to be scaled to be between -1 and 1.
+
+    # We get the overall min & max of the MV readings.
+    overall_min = min(np.min(butter_df[:, 1]), np.min(butter_df[:, 2]))
+    overall_max = max(np.max(butter_df[:, 1]), np.max(butter_df[:, 2]))
+
+    # Get the columns as numpy arrays.
+    mlii = butter_df[:, 1]
+    v5 = butter_df[:, 2]
+
+    # Scale the columns.
+    mlii = scale_input(mlii, overall_min, overall_max, -1, 1)
+    v5 = scale_input(v5, overall_min, overall_max, -1, 1)
+
+    # other = np.column_stack((mlii, v5))
+    # other = other[:159 + 1, :]
+    # test.plot_input_data(other, "Scaled & Filtered Data")
+    # Put the scaled columns back into the butter_df.
+    butter_df = np.column_stack((butter_df[:, 0], mlii, v5))
+
 
     # annotations structure: Time   Sample #  Type  Sub Chan  Num
     # there are 2275 annotations.
@@ -102,7 +144,7 @@ def read_in_csv(mv_file, annotations_file):
 
     upper_bound = 0
     lower_bound = 0
-    # annotations.shape[0]
+
     for i in range(annotations.shape[0]):
         if annotations.iloc[i][2] not in heartbeat_types:
             heartbeat_types.append(annotations.iloc[i][2])
@@ -231,7 +273,7 @@ def get_avg_seq_length(train_data):
     # Calculate the total length of the sequences in the training data.
     total_length = 0
     for sequence in train_data:
-        total_length += len(sequence[0])
+        total_length += len(sequence)
     # Calculate the average length of the sequences in the training data.
     avg_seq_length = total_length / num_sequences
     # Return the average length of the sequences in the training data.
@@ -245,48 +287,55 @@ def main():
     # the old read in csv function has the target labels in it as well.
     # train_data, heartbeat_types = old_read_in_csv(mv_file, annotation_file)
 
+    # butter_df = buter(mv_file)
+
+
     # The new one does not have the target labels in it and everything is a numpy array.
     train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
 
     # class_split_df = split_into_types(train_data, heartbeat_types, label_data)
 
     # -------------------------------------------- Input Data Visualization --------------------------------------------
-    base_input = pd.read_csv(mv_file)
-    base_input = np.delete(base_input, 0, axis=1)
-    base_input = base_input[:159, :]  # specify the sample to go until, check the annotations file for the sample number
-
-    heartbeat = train_data[0]
-
-    butter = buter(mv_file)
-    butter = np.delete(butter, 0, axis=1)
-    butter = butter[:159, :]  # specify the sample to go until, check the annotations file for the sample number.
-
-    # test.plot_input_data(base_input)
+    # base_input = pd.read_csv(mv_file)
+    # base_input = np.delete(base_input, 0, axis=1)
+    # heartbeat_sample = 159
+    # base_input = base_input[:heartbeat_sample + 1,
+    #              :]  # specify the sample to go until, check the annotations file for the sample number
+    #
+    # heartbeat = train_data[0]
+    #
+    # butter = buter(mv_file)
+    # butter = np.delete(butter, 0, axis=1)
+    # butter = butter[:heartbeat_sample + 1,
+    #          :]  # specify the sample to go until, check the annotations file for the sample number.
+    #
+    # # test.plot_input_data(butter, "Butterworth Data, Heartbeat 0 & 1")
     #
     # y_target = generate_y_target(label_data, heartbeat_types)
-
-    # print(f'The average heartbeat segment length is: {get_avg_seq_length(train_data)}')
-
+    #
+    # # print(f'\033[33m The average heartbeat segment length is: {get_avg_seq_length(train_data)}')
+    #
     # plot_data = count_classe_instances(label_data, heartbeat_types)
-    # This matrix contains as many lists as there are types of heartbeats. Each list then has every sample of that type.
-
+    # # This matrix contains as many lists as there are types of heartbeats. Each list then has every sample of that type.
+    #
     # plot_class_distribution(plot_data, heartbeat_types)
 
     # --------------------------------------------Building the ESN model------------------------------------------------
     # This is the portion of code for .
 
-    Nx = 500
+    Nx = 200
     Nu = 2
     Ny = 10
-    alpha = 0.3
     sparseness = 0.1
     little_bound = -1
     big_bound = 1
+    alpha = 0.3
+
     # rescale_factor = 0.4
 
     esn = test.ESN(Nx, Nu, Ny, sparseness, alpha, little_bound, big_bound)
-    # esn.train_readout(harvested_states, y_target)
-    harvested_states = esn.harvest_state(train_data, len(train_data))
+    # harvested_states = esn.harvest_state(train_data, len(train_data))
+    # esn.train_readout(harvested_states, y_target, True)
 
     # --------------------------------------------Operating the ESN model-----------------------------------------------
 
@@ -294,11 +343,44 @@ def main():
     # esn.set_w_out(np.load('w_out.npy'))
     # test.output_activation_plot(esn, 1, train_data[1])
     num_neurons_to_plot = 4
-    num_neurons_per_plot = 2
-    num_heartbeats_to_feed = 10
-    esn.timeseries_activation_plot(train_data, num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed, False)
-
+    num_neurons_per_plot = 4
+    num_heartbeats_to_feed = 2
+    # Whether it is segment wise or not, dicatates whether the plot is showing the activations as the update either
+    # from heartbeat to heartbeat(segment wise) or from sample to sample(not segment wise-> pair wise).
+    state_activation_title = 'Pair wise State Activation Plot'
+    segment_wise = False
+    # esn.timeseries_activation_plot(train_data, num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
+    #                                state_activation_title, segment_wise)
 
 
 if __name__ == '__main__':
     main()
+
+# selected_neurons = np.random.choice(np.arange(self.n_x), num_neurons, replace=False)
+# captured_data = np.empty((num_neurons, len(u)))
+#
+# match segment_wize:
+#
+#     case True:
+#         harvested_data = self.harvest_state(u, num_heartbeats)
+#         filtered_harvest = harvested_data[:, selected_neurons]
+#         captured_data = filtered_harvest.T
+#
+#     case False:
+#
+#         print("\033[34m Beginning to update reservoir neurons ECG channel pair wize...")
+#         for heartbeat in range(num_heartbeats):
+#             # this layer will iterate over the different pairs of data points in the input data.
+#             for i in range(len(u[heartbeat])):
+#                 # this layer will iterate over the different neurons in the reservoir and capture their
+#                 # activations.
+#                 for j in range(num_neurons):
+#                     index = selected_neurons[j]
+#                     activation = self.x[index]
+#                     captured_data[j][i] = activation
+#
+#                 # This update is for every pair, the captured data will reflect the update of the state for
+#                 # every pair.
+#                 sample = np.array(u[heartbeat][i]).T
+#                 self.update_state(sample)
+#         print("\033[36m Completed capturing state activations.\n")
