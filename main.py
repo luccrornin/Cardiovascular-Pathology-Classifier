@@ -106,11 +106,12 @@ def read_in_csv(mv_file, annotations_file):
     # So this currently is a numpy matrix with shape (650_000, 3)
     # The columns will be filtered with a butterworth filter.
     butter_df = buter(mv_file)
+
     # something = np.delete(butter_df, 0, axis=1)
     # something = something[:159 + 1, :]
     # test.plot_input_data(something, "Filtered Data")
-    # The MV readings now need to be scaled to be between -1 and 1.
 
+    # The MV readings now need to be scaled to be between -1 and 1.
     # We get the overall min & max of the MV readings.
     overall_min = min(np.min(butter_df[:, 1]), np.min(butter_df[:, 2]))
     overall_max = max(np.max(butter_df[:, 1]), np.max(butter_df[:, 2]))
@@ -126,14 +127,15 @@ def read_in_csv(mv_file, annotations_file):
     # other = np.column_stack((mlii, v5))
     # other = other[:159 + 1, :]
     # test.plot_input_data(other, "Scaled & Filtered Data")
+
     # Put the scaled columns back into the butter_df.
     butter_df = np.column_stack((butter_df[:, 0], mlii, v5))
 
-
     # annotations structure: Time   Sample #  Type  Sub Chan  Num
-    # there are 2275 annotations.
+    # there are 2,275 annotations.
     annotations_cols = ['Time', 'Sample', 'Type', 'Sub', 'Chan', 'Num']
     annotations = pd.read_csv(annotations_file, usecols=annotations_cols)
+
     # the last 3 columns are not needed, so we need a new df with only the first 3 columns
     # The shape of the annotations is (2_039, 3)
     annotations = annotations.iloc[:, :3]
@@ -145,7 +147,10 @@ def read_in_csv(mv_file, annotations_file):
     upper_bound = 0
     lower_bound = 0
 
+    # This loop iterates loops over the annotation file, giving indications of the labels and the bound of the
+    # heartbeats
     for i in range(annotations.shape[0]):
+        # If the heartbeat is not in the list of heartbeat types, add it to the list.
         if annotations.iloc[i][2] not in heartbeat_types:
             heartbeat_types.append(annotations.iloc[i][2])
 
@@ -161,6 +166,7 @@ def read_in_csv(mv_file, annotations_file):
         train_data.append(np.asarray(heartbeat_sequence))
         lower_bound = upper_bound + 1
 
+    print(f'\033[36mThe training data, label data and heartbeat types have been read in.\n')
     return train_data, label_data, heartbeat_types
 
 
@@ -177,33 +183,6 @@ def generate_y_target(label_data, heartbeat_types):
         y_target[i][heartbeat_types.index(label_data[i])] = 1
 
     return y_target
-
-
-def compare(new_seq, label, old):
-    """
-    This is just a quick helper function, wanted to see if the way I structured the data was correct and that all values
-    matched up as well as labels
-    :param new_seq: The new sequence of heartbeats, this is now only the training data input.
-    :param label: This is target labels for the input data.
-    :param old: This is the old data structure that was used where the input and label were both present.
-    :return:
-    """
-    if len(new_seq) != len(label):
-        raise ValueError("The two lists are not the same length.")
-
-    # This layer will get the heartbeat segments
-    for i in range(len(new_seq)):
-        # this layer will iterate though the values in the segment
-        for j in range(len(old[i])):
-            if new_seq[i][j][0] != old[i][0][j][0] and new_seq[i][j][1] != old[i][0][j][1]:
-                print("The values do not match.")
-                return False
-            # check if the label matches the label in the old list
-            if label[i] != old[i][1][0]:
-                print("The labels do not match.")
-                return False
-
-    print("The values match and labels match.")
 
 
 def split_into_types(data, heartbeat_types, label_data):
@@ -226,6 +205,24 @@ def split_into_types(data, heartbeat_types, label_data):
             classes[heartbeat_types.index(beat)].append(data[i])
 
     return classes
+
+
+def get_avg_seq_length(train_data):
+    """
+    This function calculates the average length of the sequences in the training data.
+    :param train_data: The training data.
+    :return: The average length of the sequences in the training data.
+    """
+    # Calculate the number of sequences in the training data.
+    num_sequences = len(train_data)
+    # Calculate the total length of the sequences in the training data.
+    total_length = 0
+    for sequence in train_data:
+        total_length += len(sequence)
+    # Calculate the average length of the sequences in the training data.
+    avg_seq_length = total_length / num_sequences
+    # Return the average length of the sequences in the training data.
+    return avg_seq_length
 
 
 def count_classe_instances(label_data, heartbeat_types):
@@ -262,22 +259,31 @@ def plot_class_distribution(plot_data, heartbeat_types):
     plt.show()
 
 
-def get_avg_seq_length(train_data):
+def compare(new_seq, label, old):
     """
-    This function calculates the average length of the sequences in the training data.
-    :param train_data: The training data.
-    :return: The average length of the sequences in the training data.
+    This is just a quick helper function, wanted to see if the way I structured the data was correct and that all values
+    matched up as well as labels
+    :param new_seq: The new sequence of heartbeats, this is now only the training data input.
+    :param label: This is target labels for the input data.
+    :param old: This is the old data structure that was used where the input and label were both present.
+    :return:
     """
-    # Calculate the number of sequences in the training data.
-    num_sequences = len(train_data)
-    # Calculate the total length of the sequences in the training data.
-    total_length = 0
-    for sequence in train_data:
-        total_length += len(sequence)
-    # Calculate the average length of the sequences in the training data.
-    avg_seq_length = total_length / num_sequences
-    # Return the average length of the sequences in the training data.
-    return avg_seq_length
+    if len(new_seq) != len(label):
+        raise ValueError("The two lists are not the same length.")
+
+    # This layer will get the heartbeat segments
+    for i in range(len(new_seq)):
+        # this layer will iterate though the values in the segment
+        for j in range(len(old[i])):
+            if new_seq[i][j][0] != old[i][0][j][0] and new_seq[i][j][1] != old[i][0][j][1]:
+                print("The values do not match.")
+                return False
+            # check if the label matches the label in the old list
+            if label[i] != old[i][1][0]:
+                print("The labels do not match.")
+                return False
+
+    print("The values match and labels match.")
 
 
 def main():
@@ -289,9 +295,11 @@ def main():
 
     # butter_df = buter(mv_file)
 
-
     # The new one does not have the target labels in it and everything is a numpy array.
     train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
+
+    # Generate the target one hot encodings the model should output.
+    y_target = generate_y_target(label_data, heartbeat_types)
 
     # class_split_df = split_into_types(train_data, heartbeat_types, label_data)
 
@@ -311,46 +319,61 @@ def main():
     #
     # # test.plot_input_data(butter, "Butterworth Data, Heartbeat 0 & 1")
     #
-    # y_target = generate_y_target(label_data, heartbeat_types)
     #
     # # print(f'\033[33m The average heartbeat segment length is: {get_avg_seq_length(train_data)}')
     #
-    # plot_data = count_classe_instances(label_data, heartbeat_types)
-    # # This matrix contains as many lists as there are types of heartbeats. Each list then has every sample of that type.
+    # plot_data = count_classe_instances(label_data, heartbeat_types) # This matrix contains as many lists as there
+    # are types of heartbeats. Each list then has every sample of that type.
     #
     # plot_class_distribution(plot_data, heartbeat_types)
 
     # --------------------------------------------Building the ESN model------------------------------------------------
     # This is the portion of code for .
 
-    Nx = 200
     Nu = 2
     Ny = 10
+
+    Nx = 1500
+    input_bias = 1
+    reservoir_bias = 1
     sparseness = 0.1
     little_bound = -1
     big_bound = 1
     alpha = 0.3
+    save = True
 
-    # rescale_factor = 0.4
+    # Create the ESN model.
+    esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
 
-    esn = test.ESN(Nx, Nu, Ny, sparseness, alpha, little_bound, big_bound)
+    # Here we harvest the activations of the reservoir units at the end of each heartbeat sequence.
     # harvested_states = esn.harvest_state(train_data, len(train_data))
-    # esn.train_readout(harvested_states, y_target, True)
+
+    # Here we train the readout weights of the ESN model using the harvested states and the target labels the model
+    # should output.
+    # esn.train_readout(harvested_states, y_target, save)
 
     # --------------------------------------------Operating the ESN model-----------------------------------------------
 
     # print("The Heartbeat Types are: ", heartbeat_types)
-    # esn.set_w_out(np.load('w_out.npy'))
-    # test.output_activation_plot(esn, 1, train_data[1])
+    esn.set_w_out(np.load('w_out.npy'))
+    # debug_output_weights = esn.w_out
+    # esn.set_linear_model('linear_model.pkl')
+
     num_neurons_to_plot = 4
-    num_neurons_per_plot = 4
+    num_neurons_per_plot = 2
     num_heartbeats_to_feed = 2
-    # Whether it is segment wise or not, dicatates whether the plot is showing the activations as the update either
-    # from heartbeat to heartbeat(segment wise) or from sample to sample(not segment wise-> pair wise).
-    state_activation_title = 'Pair wise State Activation Plot'
+    state_activation_title = f'New Activations alpha = {alpha}, n_x = {Nx}'
     segment_wise = False
     # esn.timeseries_activation_plot(train_data, num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
     #                                state_activation_title, segment_wise)
+
+    # Now that we have output weight matrix we can classify the data.
+
+    test_beat_1 = train_data[0]
+    test_beat_2 = train_data[1]
+    test_beat_3 = train_data[2]
+    esn.classify(test_beat_2, heartbeat_types)
+    # print(f'\033[32m The predicted class is: {the_hotnesss}')
 
 
 if __name__ == '__main__':

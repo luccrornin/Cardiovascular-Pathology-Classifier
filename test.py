@@ -1,6 +1,9 @@
+import pickle
+
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 import tensorflow as tf
 
 """
@@ -21,7 +24,7 @@ class ESN:
     This class is responsible for creating the Echo State Network (ESN) model.
     """
 
-    def __init__(self, n_x, n_u, n_y, sparsity, leaking_rate, lower_bound=-1, upper_bound=1):
+    def __init__(self, n_x, n_u, n_y, input_bias, reservoir_bias, sparsity, leaking_rate, lower_bound=-1, upper_bound=1):
         """
         This function is responsible for initializing the ESN model.
         :param n_x: The number of neurons in the hidden part of the reservoir.
@@ -36,11 +39,13 @@ class ESN:
         self.n_x = n_x
         self.n_u = n_u
         self.n_y = n_y
+        self.alpha = leaking_rate
         self.sparsity = sparsity
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
-        self.alpha = leaking_rate
-        placeholder_w = self.scaled_spectral_radius_matrix()
+        self.input_bias = input_bias
+        self.reservoir_bias = reservoir_bias
+        placeholder_w = self.scaled_spectral_radius_matrix(-0.2)
         self.w = placeholder_w[0]
         self.w_non_zero = placeholder_w[1]
         placeholder_w_in = self.generate_sparse_matrix(self.n_x, self.n_u)  # 500 x 2
@@ -50,7 +55,8 @@ class ESN:
         self.w_out = placeholder_w_out[0]
         self.w_out_non_zero = placeholder_w_out[1]
         self.x = self.generate_neurons(self.n_x)  # n_x x 1
-        self.y = self.generate_neurons(self.n_y)  # n_y x 1
+        # self.y = self.generate_neurons(self.n_y)  # n_y x 1
+        self.y = None
         self.linear_regression = LinearRegression()
         # u = n_u x 1, column vector
 
@@ -68,12 +74,6 @@ class ESN:
         w = np.zeros((row_dim, col_dim))
         # Calculate the number of non-zero weights in the reservoir.
         num_non_zero = int(np.round(self.sparsity * row_dim * col_dim))
-
-        # Generate a random list of indices for the non-zero weights in the reservoir.
-        # The indices are generated from a uniform distribution.
-        # The indices are generated from 0 to n_x - 1.
-        # The indices are generated without replacement.
-        # The matrix is 2d, so we need to generate two lists of indices.
 
         # we need to generate two lists of indices, one for the x-axis and one for the y-axis.
         # The indices are generated from 0 to n_x - 1.
@@ -107,12 +107,14 @@ class ESN:
         :param num_neurons: The number of neurons to be generated for a layer.
         :return: The initial state of the reservoir.
         """
+
         # Generate a random vector of size n_x.
-        x = np.random.uniform(self.lower_bound, self.upper_bound, num_neurons)
-        x = np.reshape(x, (num_neurons, 1))  # n_x x 1
+        # x = np.random.uniform(self.lower_bound, self.upper_bound, num_neurons)
+        # x = np.reshape(x, (num_neurons, 1))  # n_x x 1
         # TODO - Check out if the initilization of the reservoir to zeros is better.
-        # x = np.zeros(num_neurons)
-        # print(x.shape)
+        x = np.zeros(num_neurons)
+        x = np.reshape(x, (num_neurons, 1))  # n_x x 1
+
         # Return the initial state of the reservoir.
         return x
 
@@ -132,6 +134,17 @@ class ESN:
         """
         self.w_out = new_w_out
 
+    def set_linear_model(self, new_linear_model):
+        """
+        This function is responsible for setting the linear model to a specified or pre-trained model.
+        :param new_linear_model: The file name of the new linear model.
+        :return: None, simply sets the attribute of the class.
+        """
+        with open(new_linear_model, 'rb') as file:
+            loaded_model = pickle.load(file)
+
+        self.linear_regression = loaded_model
+
     def get_y(self, heartbeat_types):
         """
         This function is responsible for printing the decoded output of the model.
@@ -139,9 +152,10 @@ class ESN:
         """
         print(f'\033[32mModel Output: {heartbeat_types[np.argmax(self.y)]}')
 
-    def scaled_spectral_radius_matrix(self):
+    def scaled_spectral_radius_matrix(self, offset=0.0):
         """
         This function if responsible for scaling a matrix by its spectral radius.
+        :param offset: The offset to be added to the spectral radius. 0.2 would result in a spectral radius of 0.8.
         """
         # generate a weight matrix for w
         placeholder = self.generate_sparse_matrix(self.n_x, self.n_x)
@@ -149,8 +163,11 @@ class ESN:
         indices = placeholder[1]
         e = np.linalg.eigvals(w)
         spectral_radius = np.max(np.abs(e))
-        # print(f'\033[31m Spectral Radius: {spectral_radius}')
+        print(f'\033[31m Spectral Radius od the model: {spectral_radius}')
+        spectral_radius += spectral_radius * offset
         w /= spectral_radius
+
+        print(f'\033[31m The new spectral radius of the model: {np.max(np.abs(np.linalg.eigvals(w)))}')
         return w, indices
 
     def update_state(self, u):
@@ -162,8 +179,6 @@ class ESN:
         :param u: The input data at time n, corresponding to a pair of ECG data points. This is given as a 2x1 vector.
         :return: None, the state of the reservoir is updated in place.
         """
-        input_bias_value = 1
-        w_bias_value = 1
 
         # turn the state activation array into a column vector.
         transpose = self.x.reshape((self.n_x, 1))
@@ -171,12 +186,12 @@ class ESN:
         # transpose the input data to be a 2x1 vector.
         u = u.reshape((2, 1))
 
-        u_with_bias = np.vstack((np.array([[input_bias_value]]), u))
+        u_with_bias = np.vstack((np.array([[self.input_bias]]), u))
 
         # currently input weight matrix is 500x2, but we need to incorporate the bias term, so we need to make it 500x3
         bias_column = np.ones((self.n_x, 1))
         w_bias_shape = (self.n_x, 1)
-        w_bias_col_vec = np.full(w_bias_shape, w_bias_value)
+        w_bias_col_vec = np.full(w_bias_shape, self.reservoir_bias)
         w_in_with_bias = np.hstack((self.w_in, w_bias_col_vec))
         # result = np.concatenate((u, ones_column), axis=1)
         # w_in_with_bias = np.vstack((self.w_in, bias_column))
@@ -184,8 +199,8 @@ class ESN:
         # ---------------------------the update of the state(ESN Guide).------------------------------------------------
         # Calculate the update of the state.
         # print(f'w_in shape should be 500x3: {w_in_with_bias.shape} and the input should be 3x1: {u_with_bias.shape}')
-        lhs = np.matmul(w_in_with_bias, u_with_bias)
-        rhs = np.matmul(self.w, transpose)
+        lhs = np.dot(w_in_with_bias, u_with_bias)
+        rhs = np.dot(self.w, transpose)
         x_update = np.tanh(lhs + rhs)
         # x_update = np.tanh(np.dot(w_in_with_bias, u_with_bias) + np.dot(self.w, transpose))
 
@@ -210,20 +225,23 @@ class ESN:
         :param ret: A boolean value indicating whether to return the readout.
         :return: None, the readout is stored in the y attribute.
         """
-        # print(f'\033[34m Calculating readout...')
-        reservoir_bias_value = 1
         transpose = self.x.reshape((self.n_x, 1))
-        # we now want to insert a bias term into the reservoir state at the 0th index.
-        x = np.vstack((np.array([[reservoir_bias_value]]), transpose))
-        # print(f'\033[33m X shape: {x.shape}')
-        # print(f'\033[33m W_out shape: {self.w_out.shape}')
-        # print(f'\033[33m Transpose shape: {transpose.shape}')
 
-        self.y = tf.nn.softmax(np.matmul(self.w_out, x))
-        # print(f'\033[36m Readout calculated.\n')
-        # print(f'y shape: {self.y.shape}')
+        # we now want to insert a bias term into the reservoir state at the 0th index.
+        x = np.vstack((np.array([[self.reservoir_bias]]), transpose))
+
+        # Some check for the shape of the readout weight matrix and the state of the reservoir.
+        if x.shape != (self.n_x + 1, 1):
+            raise Exception(f'The state of the reservoir is not the correct shape. {self.x.shape}')
+        elif self.w_out.shape != (self.n_y, self.n_x + 1):
+            raise Exception(f'The readout weight matrix is not the correct shape. {self.w_out.shape}')
+
+        # Don't know which activation function to use for the classification task.
+        self.y = tf.nn.softmax(np.dot(self.w_out, x))
+        # output = np.tanh(np.dot(self.w_out, x))
+
         if ret:
-            print(f'\033[36m output activations: {self.y}\n')
+            print(f'\033[33m output activations using tanh: {self.y}\n')
             return self.y
 
     def timeseries_activation_plot(self, u, num_neurons, neurons_pp, num_heartbeats, title, segment_wize=True):
@@ -247,6 +265,7 @@ class ESN:
         # Create a list of lists to store the captured data. The number of inner lists is equal to the number of
         # neurons to be plotted.
         captured_data = [[] for _ in range(num_neurons)]
+
         match segment_wize:
 
             case True:
@@ -258,25 +277,39 @@ class ESN:
 
                 print("\033[34m Beginning to update reservoir neurons ECG channel pair wize...")
                 print(f'\033[33m The length of the captured data is: {len(captured_data)}')
+                # captured_data = [[[] for _ in range(num_neurons)] for _ in range(num_heartbeats)]
+                captured_data = []
 
+                # this layer will iterate over the different heartbeats in the training data.
                 for heartbeat in range(num_heartbeats):
-                    # this layer will iterate over the different pairs of data points in the input data.
-                    for sample in range(len(u[heartbeat])):
-                        # this layer will iterate over the different neurons in the reservoir and capture their
-                        # activations.
-                        for neuron in range(num_neurons):
-                            index = selected_neurons[neuron]
-                            activation = self.x[index][0]
-                            # captured_data[neuron][sample] = activation
-                            captured_data[neuron].append(activation)
+                    washout = 1
+                    heartbeat_length = len(u[heartbeat])
+                    activations = self.train_state_for_segment(u[heartbeat], washout, True)
+                    filtered_activations = activations[:, selected_neurons]
+                    # debug_filtered = np.asarray(filtered_activations.T)
+                    captured_data.append(filtered_activations.T)
 
-                        # This update is for every pair, the captured data will reflect the update of the state for
-                        # every pair.
-                        sample = np.array(u[heartbeat][sample]).T
-                        self.update_state(sample)
+                # for heartbeat in range(num_heartbeats):
+                #     # this layer will iterate over the different pairs of data points in the input data.
+                #     for sample in range(len(u[heartbeat])):
+                #
+                #         # this layer will iterate over the different neurons in the reservoir and capture their
+                #         # activations.
+                #         for neuron in range(num_neurons):
+                #             index = selected_neurons[neuron]
+                #             activation = self.x[index][0]
+                #             # captured_data[neuron][sample] = activation
+                #             captured_data[neuron].append(activation)
+                #
+                #         # This update is for every pair, the captured data will reflect the update of the state for
+                #         # every pair.
+                #         sample = np.array(u[heartbeat][sample]).T
+                #         self.update_state(sample)
                 print("\033[36m Completed capturing state activations.\n")
-
-        state_activation_plot(0, neurons_pp, neurons_pp, num_neurons, captured_data, selected_neurons, title)
+        for heartbeat in range(num_heartbeats):
+            input_heartbeat = np.asarray(u[heartbeat]).T
+            state_activation_plot(0, neurons_pp, neurons_pp, num_neurons, captured_data[heartbeat], input_heartbeat,
+                                  selected_neurons, title)
 
     # ---------------------------Training the reservoir activation states.----------------------------------------------
 
@@ -291,44 +324,66 @@ class ESN:
         :return: The state activations of the reservoir as a numpy array.
         """
         harvested_state = []
-        print("\033[34m Beginning to harvest reservoir neurons activations...")
+        washout = 3  # The washout here is the number of time the heartbeat will be fed into the reservoir to ensure a
+        # washout of the initial state of the reservoir.
+        print("\033[34m Beginning to harvest activations of neurons in the reservoir...")
         # The outer loop will iterate over the different heartbeats in the input data.
         for heartbeat in range(num_heartbeats):
-            # Appending the initial state intuitively didn't seem right, but if needed append here instead.
-
-            # for each heartbeat we want to iterate through the different samples in the heartbeat and update the state.
-            for i in range(len(u[heartbeat])):
-                # update the state of the reservoir.
-                sample = np.array(u[heartbeat][i]).T
-                self.update_state(sample)
-
-            # Append the state of the reservoir to the harvested state. Initial state will now be included.
-            # The harvest state will only inlclude the activations from the final sample in the heartbeat.
+            self.set_x(self.generate_neurons(self.n_x))
+            self.train_state_for_segment(u[heartbeat], washout)
             harvested_state.append(self.x.reshape((self.n_x,)))
 
-        print("\033[36m Completed harvesting reservoir neurons activations.\n")
+            # we now want to set an outer loop to run the heartbeats through the reservoir multiple time to washout the
+            # initial state of the reservoir.
+            # for training_sequence in range(heartbeat_repition):
+            #     # for each heartbeat we want to iterate through the different samples in the heartbeat and update the
+            #     # state.
+            #     for i in range(len(u[heartbeat])):
+            #         # update the state of the reservoir.
+            #         sample = np.array(u[heartbeat][i]).T
+            #         self.update_state(sample)
+            #
+            #     # We want to collect the final state of the reservoir activations, due to the multiple cycles of
+            #     # updated for a singular heartbeat, the initial state of the reservoir will be washed out.
+            #     if training_sequence == heartbeat_repition - 1:
+            #         harvested_state.append(self.x.reshape((self.n_x,)))
+
+        print(f'\033[33m The shape of the harvested state is: {np.asarray(harvested_state).shape}')
+        print("\033[36m Completed harvesting reservoir neuron activations.\n")
         return np.asarray(harvested_state)
 
-    def train_state_for_segment(self, u, neuron_index):
+    def train_state_for_segment(self, u, washout, ret=False):
         """
         This function is responsible for training the reservoir of the input data and updating the activations
         using all the training data.
         :param u: The input data.
-        :return: None
+        :param washout: The number of times to drive the reservoir with the same heartbeat to ensure the initial state
+        of the reservoir is washed out.
+        :param ret: Boolean indicating whether the function should return the final activations of the reservoir.
+        :return: The final activations of the reservoir, as a numpy array. If ret is False, otherwise None.
         """
-        readout_activations = []
-        print("\033[34m Beginning to update reservoir neurons activations for training...")
-        # for heartbeat in range(len(u)):
-        for i in range(len(u)):
-            sample = np.array(u[i]).T
+        activations = []
 
-            self.update_state(sample)
-            activation = self.get_readout(True)[neuron_index, 0]
-            # print(f'Activation: {activation}')
-            readout_activations.append(activation)
-        print("\033[36m Completed updating reservoir neurons activations for training.\n")
+        # We don't want to inlcude the initial states of the reservoir, as these are not representative of the
+        # activations of the reservoir. We want to washout the initial state of the reservoir, hence we will drive the
+        # reservoir with the same heartbeat for a number of times.
+        for training_sequence in range(washout):
+            for i in range(len(u)):
+                # change the shape of the input data to be a column vector, as this is what is needed for the update.
+                sample = np.array(u[i]).T
 
-        return readout_activations
+                self.update_state(sample)
+
+                # We now want to collect the final state of the reservoir activations.
+                if ret and training_sequence == washout - 1:
+                    activations.append(self.x.reshape((self.n_x,)))
+
+        # activations.append(self.x.reshape((self.n_x,)))
+
+        # print("\033[36m Completed updating reservoir neurons activations for the heartbeat sequence.\n")
+        if ret:
+            # print(f'\033[33m The shape of the activations is: {np.asarray(activations).shape}')
+            return np.asarray(activations)
 
     def train_readout(self, harvested_states, y_target, save=False):
         """
@@ -340,12 +395,14 @@ class ESN:
         :param y_target: The target output data being a matrix of one hot encodings. (num_samples, num_classes)
         :param save: Boolean indicating whether the readout weights should be saved to a file.
         :return: None
+        Note: The saved version of the readout weights has the bias included, rather the initial matrix does not.
         """
-        reservoir_bias_value = 1
+        # The bias is a column vector, so here we simply create the shape dimensions for the bias column.
         reservoir_bias_shape = (harvested_states.shape[0], 1)
 
-        # We need to concatenate the bias column to the harvested state activations.
-        bias_col = np.full(reservoir_bias_shape, reservoir_bias_value)
+        # We will not create the bias column vector, which will be concatenated to the harvested states.
+        bias_col = np.full(reservoir_bias_shape, self.reservoir_bias)
+
         # bias column will be placed as the first column in the harvested states.
         harvested_states = np.concatenate((bias_col, harvested_states), axis=1)
 
@@ -353,8 +410,18 @@ class ESN:
 
         self.linear_regression.fit(harvested_states, y_target)
 
-        self.w_out = self.linear_regression.coef_
+        # This is to save the linear model, just incase we need it later on. currently not needed just a precaution!!!!!
+        with open('linear_model.pkl', 'wb') as file:
+            pickle.dump(self.linear_regression, file)
 
+        # y_pred = self.linear_regression.predict(harvested_states)
+
+        # r_squared = self.linear_regression.score(harvested_states, y_target)
+        # print(f'\033[33m The shape of the predicted output is: {y_pred.shape}')
+        # print(f'\033[33m The error of the readout weights is: {r_squared}')
+
+        self.w_out = self.linear_regression.coef_
+        print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
         if save:
             # we will now save the weights of the matrix, so that we can use them later for other runs.
             np.save('w_out.npy', self.w_out)
@@ -362,6 +429,31 @@ class ESN:
         # print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
 
         print("\033[36m Completed training the readout weights.\n")
+
+    def classify(self, u, heartbeat_types):
+        """
+        This function is responsible for classifying the given heartbeat segment.
+        :param u: The heartbeat segment to be classified.
+        :param heartbeat_types: The different types of heartbeats.
+        :return: The predicted class.
+        """
+        # First we need to get the activations of the states once it has completed processing the heartbeat segment.
+        self.train_state_for_segment(u, 3)
+        self.get_readout()
+        self.get_y(heartbeat_types)
+
+        # return one_hot_encoding
+
+
+def ridge_regression(x, y, reg):
+    """
+    This function performs ridge regression on the given data.
+    :param x: The harvested states of the reservoir. (num_samples, n_x)
+    :param y: The target output data. (num_samples, num_classes)
+    :param reg: The regularisation parameter.
+    :return:
+    """
+    return np.matmul(np.matmul(np.linalg.inv(np.matmul(x, x.T) + reg * np.identity(x.shape[0])), x), y.T).T
 
 
 def generate_random_indices(matrix, n):
@@ -391,15 +483,17 @@ def print_matrix(matrix):
         print('\n\n')
 
 
-def state_activation_plot(start, end, step, stop, captured_data, selected_neurons, title):
+def state_activation_plot(start, end, step, stop, captured_data, input_heartbeat, selected_neurons, title):
     """
     This is recursive function that is responsible for plotting the activations of the state activations in the
     reservoir.
+    The number of neurons to plot per graph can't be less than the number of neurons to plot in total.
     :param start: The index of the first neuron to plot.
     :param end: The index of the last neuron to plot.
     :param step: The number of neurons to plot on the same graph.
     :param stop: The number of neurons to plot in total.
     :param captured_data: The data that was captured from the reservoir to be plotted.
+    :param input_heartbeat: The input heartbeat that was fed into the reservoir.
     :param selected_neurons: The neurons that were selected to be plotted.
     :param title: The title of the plot.
     :return:
@@ -408,7 +502,11 @@ def state_activation_plot(start, end, step, stop, captured_data, selected_neuron
     for i in range(start, end):
         plt.plot(captured_data[i], label=f'Neuron {selected_neurons[i]}')
 
-    plt.xlabel('Time')
+    plt.plot(input_heartbeat[0], linestyle='--', label='MlII')
+    plt.plot(input_heartbeat[1], linestyle='--', label='V1')
+
+    plt.plot()
+    plt.xlabel('Samples')
     plt.ylabel('Activation')
     plt.title(title)
     plt.legend()
@@ -417,12 +515,12 @@ def state_activation_plot(start, end, step, stop, captured_data, selected_neuron
     if end + step <= stop:  # this means that we can plot all 4 neurons on the same graph.
         new_start = end
         end = end + step
-        state_activation_plot(new_start, end, step, stop, captured_data, selected_neurons, title)
+        state_activation_plot(new_start, end, step, stop, captured_data, input_heartbeat, selected_neurons, title)
     # the next condition is for when we have less than 4 neurons to plot.
     elif end + step > stop and end != stop:
         new_start = end
         end = stop
-        state_activation_plot(new_start, end, step, stop, captured_data, selected_neurons, title)
+        state_activation_plot(new_start, end, step, stop, captured_data, input_heartbeat, selected_neurons, title)
     elif end == stop:
         print('\033[36m Completed plotting the state activations.')
         return
@@ -471,8 +569,15 @@ def plot_input_data(u, title="Input Data"):
 def main():
     """
     Notes on current hyperparameters settings:
-    The spectral radius currently when not rescaling the weights is 4.2281, this could be a tad high.
-    slightly problematic.
+    Spectral radius:
+    Sparseness:
+    alpha:
+    Input scaling:
+    Reservoir size:
+    Bounds for generating the reservoir weights(W, W_in):
+    State(x) bias:
+    Input bias:
+
     """
     Nx = 50
     Nu = 2
@@ -486,18 +591,9 @@ def main():
     # Generate the ESN model.
     esn = ESN(Nx, Nu, Ny, sparseness, alpha, little_bound, big_bound)
 
-    # TODO 1: Investigate the reservoir dynamics of the ESN model using the training data. DONE
-
-    # TODO 2: Create a method to calculate the output weights of the ESN model. DONE
-
-    # TODO 2.1: Linear regression model:
-    # TODO 2.1.1: Implement regularisation.
-    # TODO 2.1.2: Implement fitting of the model to optimize the output weights. DONE
-
-    # TODO 2.2: Create a ridge regression model to calculate the output weights. yes regularization. But harder.
-    # TODO 3: Create a method to carry out k-fold cross validation on the ESN model.
-
-    # TODO potential : go onto the input scaling part of building the reservoir for the ESN model.
+    # TODO: Investigate the weights of the ouput weight matrix as they can get very large.
+    # TODO: Implement the ridge regression function that's there for the output weights.
+    # TODO: Implement cross validation to find the best hyperparameters.
 
 
 if __name__ == '__main__':
