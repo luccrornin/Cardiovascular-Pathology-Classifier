@@ -133,8 +133,8 @@ def read_in_csv(mv_file, annotations_file):
 
     # annotations structure: Time   Sample #  Type  Sub Chan  Num
     # there are 2,275 annotations.
-    annotations_cols = ['Time', 'Sample', 'Type', 'Sub', 'Chan', 'Num']
-    annotations = pd.read_csv(annotations_file, usecols=annotations_cols)
+    #annotations_cols = ['Time', 'Sample #', 'Type', 'Sub', 'Chan', 'Aux']
+    annotations = pd.read_csv(annotations_file)
 
     # the last 3 columns are not needed, so we need a new df with only the first 3 columns
     # The shape of the annotations is (2_039, 3)
@@ -288,8 +288,8 @@ def compare(new_seq, label, old):
 
 def main():
     # -------------------------------------------- Data Preprocessing --------------------------------------------------
-    mv_file = '201.csv'
-    annotation_file = '201annotations.csv'
+    mv_file = '104.csv'
+    annotation_file = '104annotations - 104annotations.csv'
     # the old read in csv function has the target labels in it as well.
     # train_data, heartbeat_types = old_read_in_csv(mv_file, annotation_file)
 
@@ -297,11 +297,12 @@ def main():
 
     # The new one does not have the target labels in it and everything is a numpy array.
     train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
+    print(label_data[568])
 
     # Generate the target one hot encodings the model should output.
     y_target = generate_y_target(label_data, heartbeat_types)
 
-    # class_split_df = split_into_types(train_data, heartbeat_types, label_data)
+
 
     # -------------------------------------------- Input Data Visualization --------------------------------------------
     # base_input = pd.read_csv(mv_file)
@@ -322,18 +323,20 @@ def main():
     #
     # # print(f'\033[33m The average heartbeat segment length is: {get_avg_seq_length(train_data)}')
     #
+    # class_split_df = split_into_types(train_data, heartbeat_types, label_data)
+
     # plot_data = count_classe_instances(label_data, heartbeat_types) # This matrix contains as many lists as there
     # are types of heartbeats. Each list then has every sample of that type.
-    #
+
     # plot_class_distribution(plot_data, heartbeat_types)
 
     # --------------------------------------------Building the ESN model------------------------------------------------
     # This is the portion of code for .
 
     Nu = 2
-    Ny = 10
+    Ny = 7
 
-    Nx = 1500
+    Nx = 400
     input_bias = 1
     reservoir_bias = 1
     sparseness = 0.1
@@ -346,33 +349,35 @@ def main():
     esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
 
     # Here we harvest the activations of the reservoir units at the end of each heartbeat sequence.
-    # harvested_states = esn.harvest_state(train_data, len(train_data))
+    harvested_states = esn.harvest_state(train_data, len(train_data))
 
     # Here we train the readout weights of the ESN model using the harvested states and the target labels the model
     # should output.
-    # esn.train_readout(harvested_states, y_target, save)
+    esn.train_readout(harvested_states, y_target, save)
 
     # --------------------------------------------Operating the ESN model-----------------------------------------------
 
-    # print("The Heartbeat Types are: ", heartbeat_types)
-    esn.set_w_out(np.load('w_out.npy'))
+    print("The Heartbeat Types are: ", heartbeat_types)
+    # esn.set_w_out(np.load('w_out.npy'))
     # debug_output_weights = esn.w_out
     # esn.set_linear_model('linear_model.pkl')
 
     num_neurons_to_plot = 4
     num_neurons_per_plot = 2
     num_heartbeats_to_feed = 2
-    state_activation_title = f'New Activations alpha = {alpha}, n_x = {Nx}'
+    state_activation_title = f'New Activations spareness = {sparseness}, n_x = {Nx}'
     segment_wise = False
-    # esn.timeseries_activation_plot(train_data, num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
-    #                                state_activation_title, segment_wise)
+    esn.timeseries_activation_plot(train_data, num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
+                                   state_activation_title, segment_wise)
 
     # Now that we have output weight matrix we can classify the data.
 
     test_beat_1 = train_data[0]
     test_beat_2 = train_data[1]
     test_beat_3 = train_data[2]
-    esn.classify(test_beat_2, heartbeat_types)
+    test_beat_4 = train_data[568]
+    esn.classify(test_beat_2)
+    esn.get_y(heartbeat_types)
     # print(f'\033[32m The predicted class is: {the_hotnesss}')
 
 

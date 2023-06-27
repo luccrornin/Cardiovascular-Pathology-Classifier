@@ -24,7 +24,8 @@ class ESN:
     This class is responsible for creating the Echo State Network (ESN) model.
     """
 
-    def __init__(self, n_x, n_u, n_y, input_bias, reservoir_bias, sparsity, leaking_rate, lower_bound=-1, upper_bound=1):
+    def __init__(self, n_x, n_u, n_y, input_bias, reservoir_bias, sparsity, leaking_rate, lower_bound=-1,
+                 upper_bound=1):
         """
         This function is responsible for initializing the ESN model.
         :param n_x: The number of neurons in the hidden part of the reservoir.
@@ -87,9 +88,6 @@ class ESN:
         # The weights are generated from a uniform distribution.
         weights = np.random.uniform(self.lower_bound, self.upper_bound, num_non_zero)
 
-        # print(len(indices_x))
-        # print(len(indices_y))
-        # print(len(weights))
         # Assign the weights to the indices in the reservoir.
         for i in range(num_non_zero):
             x = indices[i][0]
@@ -111,7 +109,6 @@ class ESN:
         # Generate a random vector of size n_x.
         # x = np.random.uniform(self.lower_bound, self.upper_bound, num_neurons)
         # x = np.reshape(x, (num_neurons, 1))  # n_x x 1
-        # TODO - Check out if the initilization of the reservoir to zeros is better.
         x = np.zeros(num_neurons)
         x = np.reshape(x, (num_neurons, 1))  # n_x x 1
 
@@ -237,7 +234,13 @@ class ESN:
             raise Exception(f'The readout weight matrix is not the correct shape. {self.w_out.shape}')
 
         # Don't know which activation function to use for the classification task.
-        self.y = tf.nn.softmax(np.dot(self.w_out, x))
+        debug_activations_no_tang = np.dot(x.T, self.w_out.T)
+        print(f'\033[33m output activations without activation function: {debug_activations_no_tang}\n')
+        self.y = get_softmax_probs(debug_activations_no_tang)
+        # self.y = tf.sigmoid(np.dot(self.w_out, x))
+        # self.y = tf.nn.softmax(np.dot(self.w_out, x))
+        print(f'\033[33m output activations using softmax: {self.y}\n')
+
         # output = np.tanh(np.dot(self.w_out, x))
 
         if ret:
@@ -408,7 +411,9 @@ class ESN:
 
         print("\033[34m Beginning to train the readout weights...")
 
-        self.linear_regression.fit(harvested_states, y_target)
+        regularisation_factor = 0.5
+        self.w_out = ridge_regression(harvested_states, y_target, regularisation_factor)
+        # self.linear_regression.fit(harvested_states, y_target)
 
         # This is to save the linear model, just incase we need it later on. currently not needed just a precaution!!!!!
         with open('linear_model.pkl', 'wb') as file:
@@ -420,7 +425,7 @@ class ESN:
         # print(f'\033[33m The shape of the predicted output is: {y_pred.shape}')
         # print(f'\033[33m The error of the readout weights is: {r_squared}')
 
-        self.w_out = self.linear_regression.coef_
+        # self.w_out = self.linear_regression.coef_
         print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
         if save:
             # we will now save the weights of the matrix, so that we can use them later for other runs.
@@ -430,19 +435,46 @@ class ESN:
 
         print("\033[36m Completed training the readout weights.\n")
 
-    def classify(self, u, heartbeat_types):
+    def classify(self, u):
         """
         This function is responsible for classifying the given heartbeat segment.
         :param u: The heartbeat segment to be classified.
-        :param heartbeat_types: The different types of heartbeats.
         :return: The predicted class.
         """
         # First we need to get the activations of the states once it has completed processing the heartbeat segment.
-        self.train_state_for_segment(u, 3)
+        washout = 3  # This is the number of times we will drive the reservoir with the same heartbeat.
+        self.train_state_for_segment(u, washout)
         self.get_readout()
-        self.get_y(heartbeat_types)
+        print(f'\033[33m The shape of the output is: {self.y.shape}')
+        return self.y
 
-        # return one_hot_encoding
+    def test(self, test_data, test_labels):
+        """
+        This function is responsible for evaluating the performance of the ESN on the test or validation data.
+        :param test_data: Your test or validation data
+        :param test_labels: The one hot encodings which correspond to the test data.
+        :return: None, Simply prints the accuracy of the ESN on the test data.
+        """
+        # First we will get all out predictions for the test data.
+        predictions = []
+        for heartbeat in test_data:
+            heartbeat_prediction = self.classify(heartbeat)
+            predictions.append(heartbeat_prediction)
+
+        # Now with our predictions we will evaluate the performance of the ESN.
+        # The following 4 lines calculate the accuracy of the model.
+        predictions = np.asarray(predictions)
+        predicted_classes = np.argmax(predictions, axis=1)
+        true_classes = np.argmax(test_labels, axis=1)
+        accuracy = np.sum(predicted_classes == true_classes) / len(true_classes)
+
+        print(f'\033[32m The accuracy of the ESN on the test data is: {accuracy}')
+
+
+def get_softmax_probs(output_matrix):
+    # output_matrix -= np.max(output_matrix, axis=1, keepdims=True)
+    exp_output = np.exp(output_matrix)
+    return exp_output / np.sum(exp_output, axis=1, keepdims=True)
 
 
 def ridge_regression(x, y, reg):
@@ -453,6 +485,11 @@ def ridge_regression(x, y, reg):
     :param reg: The regularisation parameter.
     :return:
     """
+    print(f'\033[33m The shape of the harvested states is: {x.shape}')
+    print(f'\033[33m The shape of the target output is: {y.shape}')
+    x = x.T
+    y = y.T
+
     return np.matmul(np.matmul(np.linalg.inv(np.matmul(x, x.T) + reg * np.identity(x.shape[0])), x), y.T).T
 
 
@@ -581,7 +618,7 @@ def main():
     """
     Nx = 50
     Nu = 2
-    Ny = 10
+    Ny = 7
     sparseness = 0.1
     little_bound = -0.5
     big_bound = 0.5
