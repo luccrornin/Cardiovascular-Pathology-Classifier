@@ -288,8 +288,8 @@ def compare(new_seq, label, old):
 
 def main():
     # -------------------------------------------- Data Preprocessing --------------------------------------------------
-    mv_file = '104.csv'
-    annotation_file = '104annotations - 104annotations.csv'
+    mv_file = '106.csv'
+    annotation_file = '106annotations - 106annotations.csv'
     # the old read in csv function has the target labels in it as well.
     # train_data, heartbeat_types = old_read_in_csv(mv_file, annotation_file)
 
