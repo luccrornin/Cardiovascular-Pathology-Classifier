@@ -286,8 +286,8 @@ train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
 
 # Iterate over each heartbeat segment in train_data
 for i, heartbeat_segment in enumerate(train_data):
-    # Decimate the heartbeat segment to the desired sampling rate
-    altered_heartbeat_segment = heartbeat_segment[::10]  # Decimate by selecting every 10th sample
+    
+    altered_heartbeat_segment = heartbeat_segment[::10]  # select every 10th sample
     train_data[i] = altered_heartbeat_segment         #change from original heartbeat segment to altered
 
     # Create a new figure and subplot for each segment
@@ -311,7 +311,7 @@ for i, heartbeat_segment in enumerate(train_data):
 plt.show()
 
 # Iterate over each heartbeat segment in train_data
-# this is to plot the original heartbeat segments *if it has not been altered
+# this is to plot the original heartbeat segments **if it has not been altered** **otherwise comment out
 for i, heartbeat_segment in enumerate(train_data):
     # Create a new figure and subplot for each segment
     plt.figure()
@@ -335,12 +335,12 @@ plt.show()
 
 # compare original heart beat segment to altered
 # Select a specific heartbeat segment for analysis
+# this is only done if the variables have not changed to the altered version** otherwise comment out
 heartbeat_index = 1200
 heartbeat_segment = train_data[heartbeat_index]
 
-# Decimate the heartbeat segment to the desired sampling rate
-# this is only done if the variables have not changed to the altered version
-decimated_segment = heartbeat_segment[::10]  # Decimate by selecting every 10th sample
+
+decimated_segment = heartbeat_segment[::10]  #select every 10th sample
 
 # Create a time axis for plotting
 original_time = np.arange(len(heartbeat_segment)) / 360.0  # Original sampling rate of 360 samples per second
