@@ -279,8 +279,8 @@ def compare(new_seq, label, old):
 
     print("The values match and labels match.")
 
-mv_file = 'https://raw.githubusercontent.com/luccrornin/Cardiovascular-Pathology-Classifier/main/104.csv?token=GHSAT0AAAAAACBM5H5SAJ24XVHK5VEHNMXUZE4J5YQ'
-annotation_file = 'https://raw.githubusercontent.com/luccrornin/Cardiovascular-Pathology-Classifier/main/104annotations%20-%20104annotations.csv?token=GHSAT0AAAAAACBM5H5SQI6EJCPR725Y7JBAZE4J6FQ'
+mv_file = '106.csv'
+annotation_file = '106annotations - 106annotations.csv'
 
 train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
 
