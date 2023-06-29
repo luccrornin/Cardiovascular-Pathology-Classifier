@@ -1,5 +1,5 @@
 import pickle
-
+import random
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.linear_model import LinearRegression
@@ -160,11 +160,11 @@ class ESN:
         indices = placeholder[1]
         e = np.linalg.eigvals(w)
         spectral_radius = np.max(np.abs(e))
-        print(f'\033[31m Spectral Radius od the model: {spectral_radius}')
+        # print(f'\033[31m Spectral Radius od the model: {spectral_radius}')
         spectral_radius += spectral_radius * offset
         w /= spectral_radius
 
-        print(f'\033[31m The new spectral radius of the model: {np.max(np.abs(np.linalg.eigvals(w)))}')
+        # print(f'\033[31m The new spectral radius of the model: {np.max(np.abs(np.linalg.eigvals(w)))}')
         return w, indices
 
     def update_state(self, u):
@@ -195,7 +195,6 @@ class ESN:
 
         # ---------------------------the update of the state(ESN Guide).------------------------------------------------
         # Calculate the update of the state.
-        # print(f'w_in shape should be 500x3: {w_in_with_bias.shape} and the input should be 3x1: {u_with_bias.shape}')
         lhs = np.dot(w_in_with_bias, u_with_bias)
         rhs = np.dot(self.w, transpose)
         x_update = np.tanh(lhs + rhs)
@@ -235,15 +234,18 @@ class ESN:
 
         # Don't know which activation function to use for the classification task.
 
-        # self.y = get_softmax_probs(debug_activations_no_tang)
+        # self.y = get_softmax_probs(np.dot(self.w_out, x))
         # self.y = tf.sigmoid(np.dot(self.w_out, x))
         self.y = tf.nn.softmax(np.dot(self.w_out, x))
+        self.y = self.y.numpy()
+        self.y = np.reshape(self.y, (self.n_y,))
+        # print(f'\033[33m The readout is: {np.reshape(self.y, (self.n_y,))}')
+        # print(f'\033[33m The readout is: {self.y.T.shape}')
 
         # output = np.tanh(np.dot(self.w_out, x))
 
         if ret:
-            # print(f'\033[33m output activations using tanh: {self.y}\n')
-            return self.y
+            return self.y.T
 
     def timeseries_activation_plot(self, u, num_neurons, neurons_pp, num_heartbeats, title, segment_wize=True):
         """
@@ -276,8 +278,8 @@ class ESN:
 
             case False:
 
-                print("\033[34m Beginning to update reservoir neurons ECG channel pair wize...")
-                print(f'\033[33m The length of the captured data is: {len(captured_data)}')
+                print("\033[34m Beginning to update reservoir neurons ECG channel pair wize for plotting...")
+
                 # captured_data = [[[] for _ in range(num_neurons)] for _ in range(num_heartbeats)]
                 captured_data = []
 
@@ -305,7 +307,7 @@ class ESN:
                 #         # every pair.
                 #         sample = np.array(u[heartbeat][sample]).T
                 #         self.update_state(sample)
-                print("\033[36m Completed capturing state activations.\n")
+                print("\033[36m Completed capturing state activations for plotting.\n")
         for heartbeat in range(num_heartbeats):
             input_heartbeat = np.asarray(u[heartbeat]).T
             state_activation_plot(0, neurons_pp, neurons_pp, num_neurons, captured_data[heartbeat], input_heartbeat,
@@ -410,19 +412,7 @@ class ESN:
 
         regularisation_factor = 0.5
         self.w_out = ridge_regression(harvested_states, y_target, regularisation_factor)
-        # self.linear_regression.fit(harvested_states, y_target)
 
-        # This is to save the linear model, just incase we need it later on. currently not needed just a precaution!!!!!
-        with open('linear_model.pkl', 'wb') as file:
-            pickle.dump(self.linear_regression, file)
-
-        # y_pred = self.linear_regression.predict(harvested_states)
-
-        # r_squared = self.linear_regression.score(harvested_states, y_target)
-        # print(f'\033[33m The shape of the predicted output is: {y_pred.shape}')
-        # print(f'\033[33m The error of the readout weights is: {r_squared}')
-
-        # self.w_out = self.linear_regression.coef_
         print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
         if save:
             # we will now save the weights of the matrix, so that we can use them later for other runs.
@@ -442,6 +432,7 @@ class ESN:
         washout = 3  # This is the number of times we will drive the reservoir with the same heartbeat.
         self.train_state_for_segment(u, washout)
         self.get_readout()
+
         return self.y
 
     def train(self, train_data, train_labels):
@@ -467,13 +458,31 @@ class ESN:
 
         # Now with our predictions we will evaluate the performance of the ESN.
         # The following 4 lines calculate the accuracy of the model.
-        predictions = np.asarray(predictions)
-        predicted_classes = np.argmax(predictions, axis=1)
-        true_classes = np.argmax(test_labels, axis=1)
-        accuracy = np.sum(predicted_classes == true_classes) / len(true_classes)
+        # predictions = np.asarray(predictions)
+        # predicted_classes = np.argmax(predictions, axis=1)
+        # true_classes = np.argmax(test_labels, axis=1)
+        # accuracy = np.sum(predicted_classes == true_classes) / len(true_classes)
+        accuracy = calculate_accuracy(np.array(predictions), test_labels)
 
         print(f'\033[32m The accuracy of the ESN on the test data is: {accuracy}')
         return accuracy
+
+
+def calculate_accuracy(predictions, true_classes):
+    """
+    This function is repsonsible for calculating the accuracy of the ESN on the test data.
+    :param predictions: The predictions made by the ESN on the test data.
+    :param true_classes: The true classes of the test data.
+    :return: The accuracy of the ESN on the test data.
+    """
+    if len(predictions) != len(true_classes):
+        raise ValueError("The number of predictions and true classes must be equal.")
+    num_correct = 0
+    for i in range(len(predictions)):
+        if set(predictions[i]) == set(true_classes[i]):
+            num_correct += 1
+
+    return (num_correct / len(predictions)) * 100
 
 
 def get_softmax_probs(output_matrix):
@@ -507,6 +516,7 @@ def generate_random_indices(matrix, n):
     """
     rows, cols = matrix.shape
     indices = np.random.choice(rows * cols, size=n, replace=False)
+    # indices = random.sample(matrix, n)
     row_indices = indices // cols
     col_indices = indices % cols
     return list(zip(row_indices, col_indices))

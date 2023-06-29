@@ -1,11 +1,11 @@
-import copy
 import random
-
+import copy
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.signal import butter, filtfilt
 import test
+from sklearn.model_selection import KFold
+from scipy.signal import butter, filtfilt
 
 
 def scale_input(input_data, input_min, input_max, output_min, output_max):
@@ -55,11 +55,6 @@ def buter(mv_file):
     return filtered_df
 
 
-# Future Notes:
-# 1. The training input does not include the channel values for the sample that is annotated.
-# 2. The channel readings are not float point numbers, this should be changed to ensure no loss of info.
-# 3. All of these are lists and will first need to be converted to numpy arrays before appedning to the train_data list.
-# 4. The training data will also need to be converted into a numpy array before being fed into the model.
 def old_read_in_csv(mv_file, annotations_file):
     """
     This function reads in 2 csv files and returns 1 dataframe.
@@ -191,11 +186,13 @@ def balance_classes(train_data, label_data, heartbeat_types):
         del label_data[idx]
 
     not_wanted_labels = [i for i, val in enumerate(label_data) if val == '~' or val == '+']
+    heartbeat_types.remove('~')
+    heartbeat_types.remove('+')
     for idx in sorted(not_wanted_labels, reverse=True):
         del train_data[idx]
         del label_data[idx]
 
-    return train_data, label_data
+    return train_data, label_data, heartbeat_types
 
 
 def re_sample_data(train_data, save=False):
@@ -207,9 +204,8 @@ def re_sample_data(train_data, save=False):
     """
     for i, heartbeat in enumerate(train_data):
         altered_heartbeat = heartbeat[::10]
-        train_data[i] = altered_heartbeat
+        train_data[i] = np.asarray(altered_heartbeat)
 
-    train_data = np.asarray(train_data)
     if save:
         np.save('re_sampled_data.npy', train_data)
     return train_data
@@ -333,6 +329,68 @@ def compare(new_seq, label, old):
     print("The values match and labels match.")
 
 
+def k_fold(data, labels):
+    n_u = 2
+    n_y = 2
+    k = 5  # number of folds
+
+    # defining the K-fold cross validation
+    kfold = KFold(n_splits=k, shuffle=True)
+
+    # defining the hyperparameters
+    hyperparameters = {'n_x': [50, 100, 150],
+                       'sparsity': [0.1, 0.2, 0.3],
+                       'leaking_rate': [0.1, 0.2, 0.3],
+                       'lower_bound': [-0.5, -0.6, -0.7],
+                       'upper_bound': [0.5, 0.6, 0.7],
+                       'input_bias': [0.5, 0.75, 1.0]}
+
+    best_score = 0
+    best_hyperparameters = None
+
+    # iterating over all combinations of hyperparameters
+    for n_x in hyperparameters['n_x']:
+        for sparsity in hyperparameters['sparsity']:
+            for leaking_rate in hyperparameters['leaking_rate']:
+                for lower_bound in hyperparameters['lower_bound']:
+                    for upper_bound in hyperparameters['upper_bound']:
+                        for input_bias in hyperparameters['input_bias']:
+                            scores = []
+                            # performing k-fold cross validation for each combination of hyperparameters
+                            for train, testing in kfold.split(data):
+                                esn = test.ESN(n_x, n_u, n_y, input_bias, 1, sparsity, leaking_rate, lower_bound,
+                                               upper_bound)
+
+                                train_data = [data[i] for i in train]
+                                train_labels = np.asarray([labels[i] for i in train])
+
+                                test_data = [data[i] for i in testing]
+                                test_labels = np.asarray([labels[i] for i in testing])
+
+                                # splitting the data into training and validation set
+                                # train_data, train_labels = data[train], labels[train]
+                                # test_data, test_labels = data[testing], labels[testing]
+
+                                # training the ESN
+                                esn.train(train_data, train_labels)
+
+                                # testing the ESN
+                                score = esn.test(test_data, test_labels)
+
+                                scores.append(score)
+
+                            # computing the average validation score
+                            avg_score = sum(scores) / len(scores)
+
+                            # updating the best score and the corresponding hyperparameters
+                            if avg_score > best_score:
+                                best_score = avg_score
+                                best_hyperparameters = (n_x, n_u, n_y, sparsity, leaking_rate, lower_bound, upper_bound)
+
+    print(f'Best Score: {best_score}')
+    print(f'Best Hyperparameters: {best_hyperparameters}')
+
+
 def main():
     # -------------------------------------------- Data Preprocessing --------------------------------------------------
     mv_file = '106.csv'
@@ -350,12 +408,15 @@ def main():
 
     # The new one does not have the target labels in it and everything is a numpy array.
     train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
-    train_data, label_data = balance_classes(train_data, label_data, heartbeat_types)
+    train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
+    train_data = re_sample_data(train_data)
 
     # print(label_data[568])
 
     # Generate the target one hot encodings the model should output.
     y_target = generate_y_target(label_data, heartbeat_types)
+    print(f'The shape of the target data is: {y_target.shape}')
+    k_fold(train_data, y_target)
 
     # -------------------------------------------- Input Data Visualization --------------------------------------------
     # base_input = pd.read_csv(mv_file)
@@ -377,16 +438,16 @@ def main():
     # # print(f'\033[33m The average heartbeat segment length is: {get_avg_seq_length(train_data)}')
     #
 
-    plot_data = count_classe_instances(label_data, heartbeat_types)  # This matrix contains as many lists as there
+    # plot_data = count_classe_instances(label_data, heartbeat_types)  # This matrix contains as many lists as there
     # are types of heartbeats. Each list then has every sample of that type.
 
-    plot_class_distribution(plot_data, heartbeat_types)
+    # plot_class_distribution(plot_data, heartbeat_types)
 
     # --------------------------------------------Building the ESN model------------------------------------------------
     # This is the portion of code for .
 
     Nu = 2
-    Ny = 7
+    Ny = 2
 
     Nx = 400
     input_bias = 0.1
@@ -438,32 +499,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-# selected_neurons = np.random.choice(np.arange(self.n_x), num_neurons, replace=False)
-# captured_data = np.empty((num_neurons, len(u)))
-#
-# match segment_wize:
-#
-#     case True:
-#         harvested_data = self.harvest_state(u, num_heartbeats)
-#         filtered_harvest = harvested_data[:, selected_neurons]
-#         captured_data = filtered_harvest.T
-#
-#     case False:
-#
-#         print("\033[34m Beginning to update reservoir neurons ECG channel pair wize...")
-#         for heartbeat in range(num_heartbeats):
-#             # this layer will iterate over the different pairs of data points in the input data.
-#             for i in range(len(u[heartbeat])):
-#                 # this layer will iterate over the different neurons in the reservoir and capture their
-#                 # activations.
-#                 for j in range(num_neurons):
-#                     index = selected_neurons[j]
-#                     activation = self.x[index]
-#                     captured_data[j][i] = activation
-#
-#                 # This update is for every pair, the captured data will reflect the update of the state for
-#                 # every pair.
-#                 sample = np.array(u[heartbeat][i]).T
-#                 self.update_state(sample)
-#         print("\033[36m Completed capturing state activations.\n")
