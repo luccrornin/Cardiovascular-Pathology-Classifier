@@ -1,3 +1,6 @@
+import copy
+import random
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -133,7 +136,7 @@ def read_in_csv(mv_file, annotations_file):
 
     # annotations structure: Time   Sample #  Type  Sub Chan  Num
     # there are 2,275 annotations.
-    #annotations_cols = ['Time', 'Sample #', 'Type', 'Sub', 'Chan', 'Aux']
+    # annotations_cols = ['Time', 'Sample #', 'Type', 'Sub', 'Chan', 'Aux']
     annotations = pd.read_csv(annotations_file)
 
     # the last 3 columns are not needed, so we need a new df with only the first 3 columns
@@ -170,6 +173,48 @@ def read_in_csv(mv_file, annotations_file):
     return train_data, label_data, heartbeat_types
 
 
+def balance_classes(train_data, label_data, heartbeat_types):
+    """
+    This code balances the number of instances of normal beats and abnormal beats.
+    :param train_data: The original training data.
+    :param label_data:
+    :param heartbeat_types:
+    :return:
+    """
+    type_counts = count_classe_instances(label_data, heartbeat_types)
+    num_normal_beats_to_remove = int(type_counts[2] - type_counts[3])
+
+    normal_beat_indices = [i for i, val in enumerate(label_data) if val == 'N']
+    random_normal_beat_indices = random.sample(normal_beat_indices, num_normal_beats_to_remove)
+    for idx in sorted(random_normal_beat_indices, reverse=True):
+        del train_data[idx]
+        del label_data[idx]
+
+    not_wanted_labels = [i for i, val in enumerate(label_data) if val == '~' or val == '+']
+    for idx in sorted(not_wanted_labels, reverse=True):
+        del train_data[idx]
+        del label_data[idx]
+
+    return train_data, label_data
+
+
+def re_sample_data(train_data, save=False):
+    """
+    This function will re-sample the data such that every tenth point will be selected from each heartbeat sequence.
+    :param train_data: The collection of all heartbeat segments
+    :param save: A boolean indicating whether the re-sampled data should be saved to a file.
+    :return: The re-sampled data.
+    """
+    for i, heartbeat in enumerate(train_data):
+        altered_heartbeat = heartbeat[::10]
+        train_data[i] = altered_heartbeat
+
+    train_data = np.asarray(train_data)
+    if save:
+        np.save('re_sampled_data.npy', train_data)
+    return train_data
+
+
 def generate_y_target(label_data, heartbeat_types):
     """
     This function will generate the one hot encoding for the labels, which will be the target for the model.
@@ -194,7 +239,7 @@ def split_into_types(data, heartbeat_types, label_data):
 
     :return: A list of lists, where each list is a type of heartbeat.
     """
-    # the classes are N, A, a, J, V, F, j, p
+    print(heartbeat_types)
     classes = []
     for i in range(len(heartbeat_types)):
         classes.append([])
@@ -203,6 +248,8 @@ def split_into_types(data, heartbeat_types, label_data):
         beat = label_data[i]
         if beat in heartbeat_types:
             classes[heartbeat_types.index(beat)].append(data[i])
+
+    reduced_classes = []
 
     return classes
 
@@ -295,14 +342,20 @@ def main():
 
     # butter_df = buter(mv_file)
 
+    # df = pd.read_csv(annotation_file)
+    # subset = df.iloc[::10, :]
+    # subset.to_csv('104_subset.csv', encoding='utf-8-sig', index=False)
+    #
+    # print(subset.head())
+
     # The new one does not have the target labels in it and everything is a numpy array.
     train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
-    print(label_data[568])
+    train_data, label_data = balance_classes(train_data, label_data, heartbeat_types)
+
+    # print(label_data[568])
 
     # Generate the target one hot encodings the model should output.
     y_target = generate_y_target(label_data, heartbeat_types)
-
-
 
     # -------------------------------------------- Input Data Visualization --------------------------------------------
     # base_input = pd.read_csv(mv_file)
@@ -323,12 +376,11 @@ def main():
     #
     # # print(f'\033[33m The average heartbeat segment length is: {get_avg_seq_length(train_data)}')
     #
-    # class_split_df = split_into_types(train_data, heartbeat_types, label_data)
 
-    # plot_data = count_classe_instances(label_data, heartbeat_types) # This matrix contains as many lists as there
+    plot_data = count_classe_instances(label_data, heartbeat_types)  # This matrix contains as many lists as there
     # are types of heartbeats. Each list then has every sample of that type.
 
-    # plot_class_distribution(plot_data, heartbeat_types)
+    plot_class_distribution(plot_data, heartbeat_types)
 
     # --------------------------------------------Building the ESN model------------------------------------------------
     # This is the portion of code for .
@@ -337,47 +389,50 @@ def main():
     Ny = 7
 
     Nx = 400
-    input_bias = 1
+    input_bias = 0.1
     reservoir_bias = 1
     sparseness = 0.1
-    little_bound = -1
-    big_bound = 1
+    little_bound = -0.8
+    big_bound = 0.8
     alpha = 0.3
     save = True
 
     # Create the ESN model.
-    esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
+    # esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
+    # esn.train(train_data, y_target)
+    # esn.test(train_data, y_target)
 
     # Here we harvest the activations of the reservoir units at the end of each heartbeat sequence.
-    harvested_states = esn.harvest_state(train_data, len(train_data))
+    # harvested_states = esn.harvest_state(train_data, len(train_data))
 
     # Here we train the readout weights of the ESN model using the harvested states and the target labels the model
     # should output.
-    esn.train_readout(harvested_states, y_target, save)
+    # esn.train_readout(harvested_states, y_target, save)
 
     # --------------------------------------------Operating the ESN model-----------------------------------------------
 
-    print("The Heartbeat Types are: ", heartbeat_types)
+    # print("The Heartbeat Types are: ", heartbeat_types)
     # esn.set_w_out(np.load('w_out.npy'))
     # debug_output_weights = esn.w_out
     # esn.set_linear_model('linear_model.pkl')
 
-    num_neurons_to_plot = 4
-    num_neurons_per_plot = 2
-    num_heartbeats_to_feed = 2
-    state_activation_title = f'New Activations spareness = {sparseness}, n_x = {Nx}'
+    num_neurons_to_plot = 3
+    num_neurons_per_plot = 3
+    num_heartbeats_to_feed = 1
+    # state_activation_title = f'New Activations spareness = {sparseness}, n_x = {Nx}'
+    state_activation_title = f'L-bound = {little_bound}, U-bound = {big_bound}-wee'
     segment_wise = False
-    esn.timeseries_activation_plot(train_data, num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
-                                   state_activation_title, segment_wise)
+    # esn.timeseries_activation_plot([train_data[0]], num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
+    #                                state_activation_title, segment_wise)
 
     # Now that we have output weight matrix we can classify the data.
 
-    test_beat_1 = train_data[0]
-    test_beat_2 = train_data[1]
-    test_beat_3 = train_data[2]
-    test_beat_4 = train_data[568]
-    esn.classify(test_beat_2)
-    esn.get_y(heartbeat_types)
+    # test_beat_1 = train_data[0]
+    # test_beat_2 = train_data[1]
+    # test_beat_3 = train_data[2]
+    # test_beat_4 = train_data[568]
+    # esn.classify(test_beat_2)
+    # esn.get_y(heartbeat_types)
     # print(f'\033[32m The predicted class is: {the_hotnesss}')
 
 

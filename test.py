@@ -234,17 +234,15 @@ class ESN:
             raise Exception(f'The readout weight matrix is not the correct shape. {self.w_out.shape}')
 
         # Don't know which activation function to use for the classification task.
-        debug_activations_no_tang = np.dot(x.T, self.w_out.T)
-        print(f'\033[33m output activations without activation function: {debug_activations_no_tang}\n')
-        self.y = get_softmax_probs(debug_activations_no_tang)
+
+        # self.y = get_softmax_probs(debug_activations_no_tang)
         # self.y = tf.sigmoid(np.dot(self.w_out, x))
-        # self.y = tf.nn.softmax(np.dot(self.w_out, x))
-        print(f'\033[33m output activations using softmax: {self.y}\n')
+        self.y = tf.nn.softmax(np.dot(self.w_out, x))
 
         # output = np.tanh(np.dot(self.w_out, x))
 
         if ret:
-            print(f'\033[33m output activations using tanh: {self.y}\n')
+            # print(f'\033[33m output activations using tanh: {self.y}\n')
             return self.y
 
     def timeseries_activation_plot(self, u, num_neurons, neurons_pp, num_heartbeats, title, segment_wize=True):
@@ -285,8 +283,7 @@ class ESN:
 
                 # this layer will iterate over the different heartbeats in the training data.
                 for heartbeat in range(num_heartbeats):
-                    washout = 1
-                    heartbeat_length = len(u[heartbeat])
+                    washout = 3
                     activations = self.train_state_for_segment(u[heartbeat], washout, True)
                     filtered_activations = activations[:, selected_neurons]
                     # debug_filtered = np.asarray(filtered_activations.T)
@@ -326,7 +323,7 @@ class ESN:
         :param num_heartbeats: The number of heartbeats to use in the training data.
         :return: The state activations of the reservoir as a numpy array.
         """
-        harvested_state = []
+        harvested_states = []
         washout = 3  # The washout here is the number of time the heartbeat will be fed into the reservoir to ensure a
         # washout of the initial state of the reservoir.
         print("\033[34m Beginning to harvest activations of neurons in the reservoir...")
@@ -334,7 +331,7 @@ class ESN:
         for heartbeat in range(num_heartbeats):
             self.set_x(self.generate_neurons(self.n_x))
             self.train_state_for_segment(u[heartbeat], washout)
-            harvested_state.append(self.x.reshape((self.n_x,)))
+            harvested_states.append(self.x.reshape((self.n_x,)))
 
             # we now want to set an outer loop to run the heartbeats through the reservoir multiple time to washout the
             # initial state of the reservoir.
@@ -351,9 +348,9 @@ class ESN:
             #     if training_sequence == heartbeat_repition - 1:
             #         harvested_state.append(self.x.reshape((self.n_x,)))
 
-        print(f'\033[33m The shape of the harvested state is: {np.asarray(harvested_state).shape}')
+        print(f'\033[33m The shape of the harvested state is: {np.asarray(harvested_states).shape}')
         print("\033[36m Completed harvesting reservoir neuron activations.\n")
-        return np.asarray(harvested_state)
+        return np.asarray(harvested_states)
 
     def train_state_for_segment(self, u, washout, ret=False):
         """
@@ -445,8 +442,15 @@ class ESN:
         washout = 3  # This is the number of times we will drive the reservoir with the same heartbeat.
         self.train_state_for_segment(u, washout)
         self.get_readout()
-        print(f'\033[33m The shape of the output is: {self.y.shape}')
         return self.y
+
+    def train(self, train_data, train_labels):
+        """
+        This method is responsible for training the ESN model from training data and getting is ready for classifying.
+        :return: None
+        """
+        harvested_states = self.harvest_state(train_data, len(train_data))
+        self.train_readout(harvested_states, train_labels, save=True)
 
     def test(self, test_data, test_labels):
         """
@@ -469,6 +473,7 @@ class ESN:
         accuracy = np.sum(predicted_classes == true_classes) / len(true_classes)
 
         print(f'\033[32m The accuracy of the ESN on the test data is: {accuracy}')
+        return accuracy
 
 
 def get_softmax_probs(output_matrix):
@@ -620,8 +625,8 @@ def main():
     Nu = 2
     Ny = 7
     sparseness = 0.1
-    little_bound = -0.5
-    big_bound = 0.5
+    little_bound = -1
+    big_bound = 1
     alpha = 0.3
     # rescale_factor = 0.4
 
