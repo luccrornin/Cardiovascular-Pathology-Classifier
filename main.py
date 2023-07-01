@@ -1,10 +1,10 @@
 import random
-import copy
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import test
 from sklearn.model_selection import KFold
+from sklearn.model_selection import train_test_split
 from scipy.signal import butter, filtfilt
 
 
@@ -195,7 +195,7 @@ def balance_classes(train_data, label_data, heartbeat_types):
     return train_data, label_data, heartbeat_types
 
 
-def re_sample_data(train_data, save=False):
+def re_sample_data(train_data, step, save=False):
     """
     This function will re-sample the data such that every tenth point will be selected from each heartbeat sequence.
     :param train_data: The collection of all heartbeat segments
@@ -203,7 +203,7 @@ def re_sample_data(train_data, save=False):
     :return: The re-sampled data.
     """
     for i, heartbeat in enumerate(train_data):
-        altered_heartbeat = heartbeat[::10]
+        altered_heartbeat = heartbeat[::step]
         train_data[i] = np.asarray(altered_heartbeat)
 
     if save:
@@ -329,7 +329,7 @@ def compare(new_seq, label, old):
     print("The values match and labels match.")
 
 
-def k_fold(data, labels):
+def k_fold(data, labels, heartbeat_types):
     n_u = 2
     n_y = 2
     k = 5  # number of folds
@@ -338,11 +338,11 @@ def k_fold(data, labels):
     kfold = KFold(n_splits=k, shuffle=True)
 
     # defining the hyperparameters
-    hyperparameters = {'n_x': [50, 100, 150],
-                       'sparsity': [0.1, 0.2, 0.3],
-                       'leaking_rate': [0.1, 0.2, 0.3],
-                       'lower_bound': [-0.5, -0.6, -0.7],
-                       'upper_bound': [0.5, 0.6, 0.7],
+    hyperparameters = {'n_x': [200, 400, 600],
+                       'sparsity': [0.05, 0.1, 0.15, 0.2],
+                       'leaking_rate': [0.3, 0.5, 0.1],
+                       'lower_bound': [-0.5, -1, -0.75],
+                       'upper_bound': [0.5, 1, 0.75],
                        'input_bias': [0.5, 0.75, 1.0]}
 
     best_score = 0
@@ -352,71 +352,194 @@ def k_fold(data, labels):
     for n_x in hyperparameters['n_x']:
         for sparsity in hyperparameters['sparsity']:
             for leaking_rate in hyperparameters['leaking_rate']:
-                for lower_bound in hyperparameters['lower_bound']:
-                    for upper_bound in hyperparameters['upper_bound']:
-                        for input_bias in hyperparameters['input_bias']:
-                            scores = []
-                            # performing k-fold cross validation for each combination of hyperparameters
-                            for train, testing in kfold.split(data):
-                                esn = test.ESN(n_x, n_u, n_y, input_bias, 1, sparsity, leaking_rate, lower_bound,
-                                               upper_bound)
+                for bound in range(len(hyperparameters['lower_bound'])):
+                    for input_bias in hyperparameters['input_bias']:
+                        scores = []
+                        # performing k-fold cross validation for each combination of hyperparameters
+                        for train, testing in kfold.split(data):
+                            esn = test.ESN(n_x, n_u, n_y, input_bias, 1, sparsity, leaking_rate,
+                                           hyperparameters['lower_bound'][bound],
+                                           hyperparameters['upper_bound'][bound])
 
-                                train_data = [data[i] for i in train]
-                                train_labels = np.asarray([labels[i] for i in train])
+                            train_data = [data[i] for i in train]
+                            train_labels = np.asarray([labels[i] for i in train])
 
-                                test_data = [data[i] for i in testing]
-                                test_labels = np.asarray([labels[i] for i in testing])
+                            test_data = [data[i] for i in testing]
+                            test_labels = np.asarray([labels[i] for i in testing])
 
-                                # splitting the data into training and validation set
-                                # train_data, train_labels = data[train], labels[train]
-                                # test_data, test_labels = data[testing], labels[testing]
+                            # splitting the data into training and validation set
+                            # train_data, train_labels = data[train], labels[train]
+                            # test_data, test_labels = data[testing], labels[testing]
 
-                                # training the ESN
-                                esn.train(train_data, train_labels)
+                            # training the ESN
+                            esn.train(train_data, train_labels)
 
-                                # testing the ESN
-                                score = esn.test(test_data, test_labels)
+                            # testing the ESN
+                            score = esn.test(test_data, test_labels, heartbeat_types)
 
-                                scores.append(score)
+                            scores.append(score)
 
-                            # computing the average validation score
-                            avg_score = sum(scores) / len(scores)
+                        print(
+                            f'\033[32m Hyperparameters: Nx:{n_x}\nInput Bias: {input_bias}\nSparness: {sparsity}\nLeaking rate: {leaking_rate}\nlower bound: {hyperparameters["lower_bound"][bound]} & upper bound: {hyperparameters["upper_bound"][bound]}')
 
-                            # updating the best score and the corresponding hyperparameters
-                            if avg_score > best_score:
-                                best_score = avg_score
-                                best_hyperparameters = (n_x, n_u, n_y, sparsity, leaking_rate, lower_bound, upper_bound)
+                        # computing the average validation score
+                        # avg_score = sum(scores) / len(scores)
+                        np_scores = np.asarray(scores)
+                        avg_score = np.mean(np_scores)
+                        variance = np.var(np_scores)
+                        # sd = np_scores.std()
+                        # score_range = np.max(np_scores) - np.min(np_scores)
+                        print(f'\033[32m Average Score: {avg_score}')
+                        print(f'\033[32m Variance Score: {variance}')
+                        # print(f'\033[32m Standard Deviation: {sd}')
+                        # print(f'\033[32m Score Range: {score_range}')
+
+                        # updating the best score and the corresponding hyperparameters
+                        if avg_score > best_score:
+                            best_score = avg_score
+                            best_hyperparameters = (
+                                n_x, n_u, n_y, input_bias, sparsity, leaking_rate,
+                                hyperparameters['lower_bound'][bound],
+                                hyperparameters['upper_bound'][bound])
 
     print(f'Best Score: {best_score}')
     print(f'Best Hyperparameters: {best_hyperparameters}')
+
+
+def cross_validation(mv_file, annotation_file):
+    Nu = 2
+    Ny = 2
+
+    train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
+    train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
+    train_data = re_sample_data(train_data, 2)
+
+    # defining the hyperparameters
+    hyperparameters = {
+        'Nx': [200, 400],
+        'input_bias': [0.5, 1],
+        'sparseness': [0.1, 0.15],
+        'leaking_rate': [0.3, 0.5],
+        'upper_bound': [0.5, 1]
+    }
+    repetitions = 3
+    best_score = 0
+    for n_x in hyperparameters['Nx']:
+        for input_bias in hyperparameters['input_bias']:
+            for sparseness in hyperparameters['sparseness']:
+                for leaking_rate in hyperparameters['leaking_rate']:
+                    for bound in hyperparameters['upper_bound']:
+                        scores = []
+                        lower_bound = -1
+                        print(f'\033[33mBeginning repetitions')
+                        for repetition in range(repetitions):
+                            rep_train_data, rep_test_data, rep_train_labels, rep_test_labels = train_test_split(
+                                train_data, label_data, test_size=0.6, random_state=42)
+                            y_train_target = generate_y_target(rep_train_labels, heartbeat_types)
+                            y_test_target = generate_y_target(rep_test_labels, heartbeat_types)
+
+                            esn = test.ESN(n_x, Nu, Ny, input_bias, 1, sparseness, leaking_rate, -bound, bound)
+
+                            # training the ESN
+                            esn.train(rep_train_data, y_train_target)
+
+                            # testing the ESN
+                            score = esn.test(rep_test_data, y_test_target, heartbeat_types)
+
+                            scores.append(score)
+
+                        # computing the average validation score
+                        np_scores = np.asarray(scores)
+                        avg_score = np.mean(np_scores)
+                        variance = np.var(np_scores)
+                        print(f'\033[32m Average Score: {avg_score}')
+                        print(f'\033[32m Variance Score: {variance}')
+                        print(
+                            f'\033[32mHyperparameters: Nx:{n_x}\nInput Bias: {input_bias}\nSparness: {sparseness}\nLeaking rate: {leaking_rate}\nlower bound: {-bound} & upper bound: {bound}')
+
+                        # updating the best score and the corresponding hyperparameters
+                        if avg_score > best_score:
+                            best_score = avg_score
+                            best_hyperparameters = (
+                                n_x, Nu, Ny, input_bias, sparseness, leaking_rate, -bound, bound)
+
+
+def test1(mv_file, annotation_file):
+    train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
+    train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
+    resample_step = 2
+    train_data = re_sample_data(train_data, resample_step)
+
+    y_target = generate_y_target(label_data, heartbeat_types)
+
+    Nu = 2
+    Ny = 2
+
+    Nx = 400
+    input_bias = 0.1
+    reservoir_bias = 1
+    sparseness = 0.1
+    little_bound = -1
+    big_bound = 1
+    alpha = 0.3
+    regularisation = 0.2
+    washout = 5
+    save = True
+
+    # Create the ESN model.
+    esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
+    esn.set_washout(washout)
+    esn.set_regularisation_factor(regularisation)
+
+    harvested_states = esn.harvest_state(train_data, len(train_data))
+
+    esn.train_readout(harvested_states, y_target, save)
+
+    num_neurons_to_plot = 3
+    num_neurons_per_plot = 3
+    num_heartbeats_to_feed = 1
+    state_activation_title = f'Nx = {Nx}, Lbound = {little_bound}, Ubound = {big_bound}'
+    # state_activation_title = f'L-bound = {little_bound}, U-bound = {big_bound}'
+    segment_wise = False
+    esn.timeseries_activation_plot([train_data[0]], num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
+                                   state_activation_title, segment_wise)
+
+    # print("The Heartbeat Types are: ", heartbeat_types)
+    # esn.set_w_out(np.load('w_out.npy'))
+    # debug_output_weights = esn.w_out
+
+    test_beat_1 = train_data[41]
+    # test_beat_2 = train_data[1]
+    # test_beat_3 = train_data[2]
+    # test_beat_4 = train_data[568]
+    print(f'\033[32m The class should be {y_target[0]}')
+    probabilities = esn.classify(test_beat_1)
+    esn.get_y(heartbeat_types)
 
 
 def main():
     # -------------------------------------------- Data Preprocessing --------------------------------------------------
     mv_file = '106.csv'
     annotation_file = '106annotations - 106annotations.csv'
-    # the old read in csv function has the target labels in it as well.
-    # train_data, heartbeat_types = old_read_in_csv(mv_file, annotation_file)
 
-    # butter_df = buter(mv_file)
+    # test1(mv_file, annotation_file)
+    # test2(mv_file, annotation_file)
+    cross_validation(mv_file, annotation_file)
 
-    # df = pd.read_csv(annotation_file)
-    # subset = df.iloc[::10, :]
-    # subset.to_csv('104_subset.csv', encoding='utf-8-sig', index=False)
+    # train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
+    # train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
+    # resample_step = 2 # experiment with this value and also the washout.
+    # # train_data = re_sample_data(train_data, resample_step)
     #
-    # print(subset.head())
-
-    # The new one does not have the target labels in it and everything is a numpy array.
-    train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
-    train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
-    train_data = re_sample_data(train_data)
-
-    # print(label_data[568])
-
-    # Generate the target one hot encodings the model should output.
-    y_target = generate_y_target(label_data, heartbeat_types)
-    print(f'The shape of the target data is: {y_target.shape}')
-    k_fold(train_data, y_target)
+    # train_data, test_data, train_labels, test_labels = train_test_split(train_data, label_data, test_size=0.2, random_state=42)
+    #
+    # # print(label_data[568])
+    #
+    # # Generate the target one hot encodings the model should output.
+    # y_train_target = generate_y_target(label_data, heartbeat_types)
+    # y_test_target = generate_y_target(test_labels, heartbeat_types)
+    #
+    # k_fold(train_data, y_train_target, heartbeat_types)
 
     # -------------------------------------------- Input Data Visualization --------------------------------------------
     # base_input = pd.read_csv(mv_file)
@@ -453,13 +576,17 @@ def main():
     input_bias = 0.1
     reservoir_bias = 1
     sparseness = 0.1
-    little_bound = -0.8
-    big_bound = 0.8
+    little_bound = -1
+    big_bound = 1
     alpha = 0.3
+    regularisation = 0.2
+    washout = 5
     save = True
 
     # Create the ESN model.
     # esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
+    # esn.set_washout(washout)
+    # esn.set_regularisation_factor(regularisation)
     # esn.train(train_data, y_target)
     # esn.test(train_data, y_target)
 
@@ -471,30 +598,6 @@ def main():
     # esn.train_readout(harvested_states, y_target, save)
 
     # --------------------------------------------Operating the ESN model-----------------------------------------------
-
-    # print("The Heartbeat Types are: ", heartbeat_types)
-    # esn.set_w_out(np.load('w_out.npy'))
-    # debug_output_weights = esn.w_out
-    # esn.set_linear_model('linear_model.pkl')
-
-    num_neurons_to_plot = 3
-    num_neurons_per_plot = 3
-    num_heartbeats_to_feed = 1
-    # state_activation_title = f'New Activations spareness = {sparseness}, n_x = {Nx}'
-    state_activation_title = f'L-bound = {little_bound}, U-bound = {big_bound}-wee'
-    segment_wise = False
-    # esn.timeseries_activation_plot([train_data[0]], num_neurons_to_plot, num_neurons_per_plot, num_heartbeats_to_feed,
-    #                                state_activation_title, segment_wise)
-
-    # Now that we have output weight matrix we can classify the data.
-
-    # test_beat_1 = train_data[0]
-    # test_beat_2 = train_data[1]
-    # test_beat_3 = train_data[2]
-    # test_beat_4 = train_data[568]
-    # esn.classify(test_beat_2)
-    # esn.get_y(heartbeat_types)
-    # print(f'\033[32m The predicted class is: {the_hotnesss}')
 
 
 if __name__ == '__main__':

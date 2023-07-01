@@ -46,6 +46,9 @@ class ESN:
         self.upper_bound = upper_bound
         self.input_bias = input_bias
         self.reservoir_bias = reservoir_bias
+        self.washout = 3  # The washout here is the number of time the heartbeat will be fed into the reservoir to
+        # ensure a washout of the initial state of the reservoir.
+        self.regularisation_factor = 0.6
         placeholder_w = self.scaled_spectral_radius_matrix(-0.2)
         self.w = placeholder_w[0]
         self.w_non_zero = placeholder_w[1]
@@ -130,6 +133,24 @@ class ESN:
         :return: None
         """
         self.w_out = new_w_out
+
+    def set_washout(self, new_washout):
+        """
+        This function is responsible for setting the washout of the reservoir.
+        The washout here is how many times a single heartbeat segment will be fed into the reservoir to washout the
+        initial state of the reservoir.
+        :param new_washout: The new washout of the reservoir.
+        :return: None, simply update the attribute of the class.
+        """
+        self.washout = new_washout
+
+    def set_regularisation_factor(self, new_regularisation_factor):
+        """
+        This function is responsible for setting the regularisation factor of the model.
+        :param new_regularisation_factor: The new regularisation factor of the model.
+        :return: None, simply update the attribute of the class.
+        """
+        self.regularisation_factor = new_regularisation_factor
 
     def set_linear_model(self, new_linear_model):
         """
@@ -235,8 +256,11 @@ class ESN:
         # Don't know which activation function to use for the classification task.
 
         # self.y = get_softmax_probs(np.dot(self.w_out, x))
-        # self.y = tf.sigmoid(np.dot(self.w_out, x))
-        self.y = tf.nn.softmax(np.dot(self.w_out, x))
+        # print(f'\033[33m output before relu: {np.dot(self.w_out, x)}')
+        self.y = tf.sigmoid(np.dot(self.w_out, x))
+        # self.y = tf.nn.relu(np.dot(self.w_out, x))
+        # self.y = tf.nn.softmax(np.dot(self.w_out, x))
+        # print(f'\033[33m output after relu: {self.y}')
         self.y = self.y.numpy()
         self.y = np.reshape(self.y, (self.n_y,))
         # print(f'\033[33m The readout is: {np.reshape(self.y, (self.n_y,))}')
@@ -285,8 +309,7 @@ class ESN:
 
                 # this layer will iterate over the different heartbeats in the training data.
                 for heartbeat in range(num_heartbeats):
-                    washout = 3
-                    activations = self.train_state_for_segment(u[heartbeat], washout, True)
+                    activations = self.train_state_for_segment(u[heartbeat], self.washout, True)
                     filtered_activations = activations[:, selected_neurons]
                     # debug_filtered = np.asarray(filtered_activations.T)
                     captured_data.append(filtered_activations.T)
@@ -326,13 +349,12 @@ class ESN:
         :return: The state activations of the reservoir as a numpy array.
         """
         harvested_states = []
-        washout = 3  # The washout here is the number of time the heartbeat will be fed into the reservoir to ensure a
-        # washout of the initial state of the reservoir.
-        print("\033[34m Beginning to harvest activations of neurons in the reservoir...")
+        # print("\033[34m Beginning to harvest activations of neurons in the reservoir...")
         # The outer loop will iterate over the different heartbeats in the input data.
         for heartbeat in range(num_heartbeats):
+            # reset the state of the reservoir, before feeding in the next heartbeat.
             self.set_x(self.generate_neurons(self.n_x))
-            self.train_state_for_segment(u[heartbeat], washout)
+            self.train_state_for_segment(u[heartbeat], self.washout)
             harvested_states.append(self.x.reshape((self.n_x,)))
 
             # we now want to set an outer loop to run the heartbeats through the reservoir multiple time to washout the
@@ -350,8 +372,8 @@ class ESN:
             #     if training_sequence == heartbeat_repition - 1:
             #         harvested_state.append(self.x.reshape((self.n_x,)))
 
-        print(f'\033[33m The shape of the harvested state is: {np.asarray(harvested_states).shape}')
-        print("\033[36m Completed harvesting reservoir neuron activations.\n")
+        # print(f'\033[33m The shape of the harvested state is: {np.asarray(harvested_states).shape}')
+        # print("\033[36m Completed harvesting reservoir neuron activations.\n")
         return np.asarray(harvested_states)
 
     def train_state_for_segment(self, u, washout, ret=False):
@@ -408,19 +430,18 @@ class ESN:
         # bias column will be placed as the first column in the harvested states.
         harvested_states = np.concatenate((bias_col, harvested_states), axis=1)
 
-        print("\033[34m Beginning to train the readout weights...")
+        # print("\033[34m Beginning to train the readout weights...")
 
-        regularisation_factor = 0.5
-        self.w_out = ridge_regression(harvested_states, y_target, regularisation_factor)
+        self.w_out = ridge_regression(harvested_states, y_target, self.regularisation_factor)
 
-        print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
+        # print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
         if save:
             # we will now save the weights of the matrix, so that we can use them later for other runs.
             np.save('w_out.npy', self.w_out)
 
         # print(f'\033[33m The shape of the readout weights is: {self.w_out.shape}')
 
-        print("\033[36m Completed training the readout weights.\n")
+        # print("\033[36m Completed training the readout weights.\n")
 
     def classify(self, u):
         """
@@ -438,17 +459,19 @@ class ESN:
     def train(self, train_data, train_labels):
         """
         This method is responsible for training the ESN model from training data and getting is ready for classifying.
+        :param train_data: The training data consisting of lists of heartbeat segments.
+        :param train_labels: The one hot encodings which correspond to the training data.
         :return: None
         """
         harvested_states = self.harvest_state(train_data, len(train_data))
         self.train_readout(harvested_states, train_labels, save=True)
 
-    def test(self, test_data, test_labels):
+    def test(self, test_data, test_labels, heartbeat_types):
         """
         This function is responsible for evaluating the performance of the ESN on the test or validation data.
         :param test_data: Your test or validation data
         :param test_labels: The one hot encodings which correspond to the test data.
-        :return: None, Simply prints the accuracy of the ESN on the test data.
+        :return: Returns the accuracy of the ESN on the test data.
         """
         # First we will get all out predictions for the test data.
         predictions = []
@@ -462,24 +485,28 @@ class ESN:
         # predicted_classes = np.argmax(predictions, axis=1)
         # true_classes = np.argmax(test_labels, axis=1)
         # accuracy = np.sum(predicted_classes == true_classes) / len(true_classes)
-        accuracy = calculate_accuracy(np.array(predictions), test_labels)
+        accuracy = calculate_accuracy(np.array(predictions), test_labels, heartbeat_types)
 
         print(f'\033[32m The accuracy of the ESN on the test data is: {accuracy}')
         return accuracy
 
 
-def calculate_accuracy(predictions, true_classes):
+def calculate_accuracy(predictions, true_classes, heartbeat_types):
     """
     This function is repsonsible for calculating the accuracy of the ESN on the test data.
     :param predictions: The predictions made by the ESN on the test data.
     :param true_classes: The true classes of the test data.
+    :param heartbeat_types: The different types of heartbeats.
     :return: The accuracy of the ESN on the test data.
     """
     if len(predictions) != len(true_classes):
         raise ValueError("The number of predictions and true classes must be equal.")
     num_correct = 0
     for i in range(len(predictions)):
-        if set(predictions[i]) == set(true_classes[i]):
+        # make an array of zeros, and set the index of the maximum value to 1.
+        prediction = heartbeat_types[np.argmax(predictions[i])]
+        true_class = heartbeat_types[np.argmax(true_classes[i])]
+        if prediction == true_class:
             num_correct += 1
 
     return (num_correct / len(predictions)) * 100
@@ -499,8 +526,6 @@ def ridge_regression(x, y, reg):
     :param reg: The regularisation parameter.
     :return:
     """
-    print(f'\033[33m The shape of the harvested states is: {x.shape}')
-    print(f'\033[33m The shape of the target output is: {y.shape}')
     x = x.T
     y = y.T
 
