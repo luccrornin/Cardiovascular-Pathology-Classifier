@@ -10,17 +10,13 @@ from scipy.signal import butter, filtfilt
 
 def scale_input(input_data, input_min, input_max, output_min, output_max):
     """
-    Scale the input data to a specified output range.
-
-    Args:
-        input_data (ndarray): Input data to be scaled.
-        input_min (float): Minimum value of the input data.
-        input_max (float): Maximum value of the input data.
-        output_min (float): Desired minimum value of the output range.
-        output_max (float): Desired maximum value of the output range.
-
-    Returns:
-        ndarray: Scaled input data.
+    Scale the input data to a specified output range. All floats
+    :param input_data: Input data to be scaled.
+    :param input_min: Minimum value of the input data.
+    :param input_max: Maximum value of the input data.
+    :param output_min: Desired minimum value of the output range.
+    :param output_max: Desired maximum value of the output range.
+    :return: Scaled input data.
     """
     scaled_data = ((input_data - input_min) / (input_max - input_min)) * (output_max - output_min) + output_min
     return scaled_data
@@ -53,51 +49,6 @@ def buter(mv_file):
     filtered_df = np.insert(filtered_data, 0, index, axis=1)
 
     return filtered_df
-
-
-def old_read_in_csv(mv_file, annotations_file):
-    """
-    This function reads in 2 csv files and returns 1 dataframe.
-    :param mv_file: The csv file containing the mv readings for the whole ambulatory ECG scan.
-    :param annotations_file: The csv file containing the annotations for the ambulatory ECG scan.
-    :return: The dataframe containing the mv readings and the annotations as a numpy array & a list of the types.
-    Data Frame Structure:
-    The returned data frame consists of [sample_index][mv_readings = 0|annotation = 1][tuples of channels]
-    [Channel 1 or 2|Type] & the types of heartbeats in a list.
-    """
-    # mv_readings structure: #sample, Signal reading 1, Signal reading 2
-    # there are 650k samples.
-    buttery_mv_df = buter(mv_file)  # This is the filtered data, using the butterworth filter.
-
-    # annotations structure: Time   Sample #  Type  Sub Chan  Num
-    # there are 2275 annotations.
-    annotations_cols = ['Time', 'Sample', 'Type', 'Sub', 'Chan', 'Num']
-    annotations = pd.read_csv(annotations_file, usecols=annotations_cols)
-    # the last 3 columns are not needed, so we need a new df with only the first 3 columns
-    annotations = annotations.iloc[:, :3]
-
-    train_data = []
-    heartbeat_types = []
-    upper_bound = 0
-    lower_bound = 0
-    for i in range(len(annotations)):
-        sample_row_x = []  # This is the time series of a heartbeat
-        sample_row_y = []  # This is the annotation of the heartbeat
-        upper_bound = annotations.iloc[i]['Sample']
-        # if we see a type of heartbeat that we have not seen before, we add it to the list of heartbeat types
-        if annotations.iloc[i]['Type'] not in heartbeat_types:
-            heartbeat_types.append(annotations.iloc[i]['Type'])
-
-        sample_row_y.append(annotations.iloc[i]['Type'])
-
-        # Run through the mv readings and append the readings to the sample_row_x as tuples of (channel 1, channel 2)
-        for j in range(lower_bound, upper_bound):
-            sample_row_x.append((buttery_mv_df[j][1], buttery_mv_df[j][2]))
-
-        train_data.append([sample_row_x, sample_row_y])
-        lower_bound = upper_bound + 1
-
-    return train_data, heartbeat_types
 
 
 def read_in_csv(mv_file, annotations_file):
@@ -302,33 +253,6 @@ def plot_class_distribution(plot_data, heartbeat_types):
     plt.show()
 
 
-def compare(new_seq, label, old):
-    """
-    This is just a quick helper function, wanted to see if the way I structured the data was correct and that all values
-    matched up as well as labels
-    :param new_seq: The new sequence of heartbeats, this is now only the training data input.
-    :param label: This is target labels for the input data.
-    :param old: This is the old data structure that was used where the input and label were both present.
-    :return:
-    """
-    if len(new_seq) != len(label):
-        raise ValueError("The two lists are not the same length.")
-
-    # This layer will get the heartbeat segments
-    for i in range(len(new_seq)):
-        # this layer will iterate though the values in the segment
-        for j in range(len(old[i])):
-            if new_seq[i][j][0] != old[i][0][j][0] and new_seq[i][j][1] != old[i][0][j][1]:
-                print("The values do not match.")
-                return False
-            # check if the label matches the label in the old list
-            if label[i] != old[i][1][0]:
-                print("The labels do not match.")
-                return False
-
-    print("The values match and labels match.")
-
-
 def k_fold(data, labels, heartbeat_types):
     n_u = 2
     n_y = 2
@@ -434,7 +358,7 @@ def cross_validation(mv_file, annotation_file):
                         print(f'\033[33mBeginning repetitions')
                         for repetition in range(repetitions):
                             rep_train_data, rep_test_data, rep_train_labels, rep_test_labels = train_test_split(
-                                train_data, label_data, test_size=0.6, random_state=42)
+                                train_data, label_data, test_size=0.5, random_state=42)
                             y_train_target = generate_y_target(rep_train_labels, heartbeat_types)
                             y_test_target = generate_y_target(rep_test_labels, heartbeat_types)
 
@@ -517,54 +441,78 @@ def test1(mv_file, annotation_file):
     esn.get_y(heartbeat_types)
 
 
+def evaluate_model(mv_file, annotations_file):
+    """
+    This function will evaluate the performance of the model on the test data.
+    The model will be tested multiple times on different partitions of the data.
+    Each partition will be of a 40% training and 60% testing split.
+    :param mv_file: The file containing the mv readings.
+    :param annotations_file: The file containing the annotations.
+    :return: The average accuracy of the model and the variance.
+    """
+
+    train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotations_file)
+    train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
+    resample_step = 2
+    train_data = re_sample_data(train_data, resample_step)
+
+    Nu = 2
+    Ny = 2
+
+    Nx = 200
+    input_bias = 0.5
+    reservoir_bias = 1
+    sparseness = 0.15
+    leaking_rate = 0.3
+    little_bound = -1
+    big_bound = 1
+
+    repetitions = 10
+    scores = []
+    for i in range(repetitions):
+        print(f'\033[33m Repetition {i + 1} of {repetitions}')
+        esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, leaking_rate, little_bound, big_bound)
+
+        rep_train_data, rep_test_data, rep_train_labels, rep_test_labels = train_test_split(
+            train_data, label_data, test_size=0.5, random_state=42)
+
+        y_train_target = generate_y_target(rep_train_labels, heartbeat_types)
+        y_test_target = generate_y_target(rep_test_labels, heartbeat_types)
+
+        esn.train(rep_train_data, y_train_target)
+
+        score = esn.test(rep_test_data, y_test_target, heartbeat_types)
+
+        scores.append(score)
+
+    scores = np.array(scores)
+    avg_score = np.mean(scores)
+    variance = np.var(scores)
+
+    return avg_score, variance
+
+
 def main():
     # -------------------------------------------- Data Preprocessing --------------------------------------------------
     mv_file = '106.csv'
     annotation_file = '106annotations - 106annotations.csv'
 
     # test1(mv_file, annotation_file)
-    # test2(mv_file, annotation_file)
-    cross_validation(mv_file, annotation_file)
+    # cross_validation(mv_file, annotation_file)
+    # avg_score, variance = evaluate_model(mv_file, annotation_file)
+    # print(f'\033[32m The average score is {avg_score} and the variance is {variance}')
 
-    # train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
-    # train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
-    # resample_step = 2 # experiment with this value and also the washout.
-    # # train_data = re_sample_data(train_data, resample_step)
-    #
-    # train_data, test_data, train_labels, test_labels = train_test_split(train_data, label_data, test_size=0.2, random_state=42)
-    #
-    # # print(label_data[568])
-    #
-    # # Generate the target one hot encodings the model should output.
-    # y_train_target = generate_y_target(label_data, heartbeat_types)
-    # y_test_target = generate_y_target(test_labels, heartbeat_types)
-    #
-    # k_fold(train_data, y_train_target, heartbeat_types)
+    train_data, label_data, heartbeat_types = read_in_csv(mv_file, annotation_file)
+    train_data, label_data, heartbeat_types = balance_classes(train_data, label_data, heartbeat_types)
+    resample_step = 2 # experiment with this value and also the washout.
+    train_data = re_sample_data(train_data, resample_step)
 
-    # -------------------------------------------- Input Data Visualization --------------------------------------------
-    # base_input = pd.read_csv(mv_file)
-    # base_input = np.delete(base_input, 0, axis=1)
-    # heartbeat_sample = 159
-    # base_input = base_input[:heartbeat_sample + 1,
-    #              :]  # specify the sample to go until, check the annotations file for the sample number
-    #
-    # heartbeat = train_data[0]
-    #
-    # butter = buter(mv_file)
-    # butter = np.delete(butter, 0, axis=1)
-    # butter = butter[:heartbeat_sample + 1,
-    #          :]  # specify the sample to go until, check the annotations file for the sample number.
-    #
-    # # test.plot_input_data(butter, "Butterworth Data, Heartbeat 0 & 1")
-    #
-    #
-    # # print(f'\033[33m The average heartbeat segment length is: {get_avg_seq_length(train_data)}')
-    #
+    train_data, test_data, train_labels, test_labels = train_test_split(train_data, label_data, test_size=0.5, random_state=42)
 
-    # plot_data = count_classe_instances(label_data, heartbeat_types)  # This matrix contains as many lists as there
-    # are types of heartbeats. Each list then has every sample of that type.
 
-    # plot_class_distribution(plot_data, heartbeat_types)
+    # Generate the target one hot encodings the model should output.
+    y_train_target = generate_y_target(train_labels, heartbeat_types)
+    y_test_target = generate_y_target(test_labels, heartbeat_types)
 
     # --------------------------------------------Building the ESN model------------------------------------------------
     # This is the portion of code for .
@@ -572,10 +520,10 @@ def main():
     Nu = 2
     Ny = 2
 
-    Nx = 400
-    input_bias = 0.1
+    Nx = 200
+    input_bias = 0.5
     reservoir_bias = 1
-    sparseness = 0.1
+    sparseness = 0.15
     little_bound = -1
     big_bound = 1
     alpha = 0.3
@@ -584,20 +532,11 @@ def main():
     save = True
 
     # Create the ESN model.
-    # esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
-    # esn.set_washout(washout)
-    # esn.set_regularisation_factor(regularisation)
-    # esn.train(train_data, y_target)
-    # esn.test(train_data, y_target)
 
-    # Here we harvest the activations of the reservoir units at the end of each heartbeat sequence.
-    # harvested_states = esn.harvest_state(train_data, len(train_data))
-
-    # Here we train the readout weights of the ESN model using the harvested states and the target labels the model
-    # should output.
-    # esn.train_readout(harvested_states, y_target, save)
-
-    # --------------------------------------------Operating the ESN model-----------------------------------------------
+    esn = test.ESN(Nx, Nu, Ny, input_bias, reservoir_bias, sparseness, alpha, little_bound, big_bound)
+    esn.train(train_data, y_train_target)
+    esn.test(test_data, y_test_target, heartbeat_types)
+    # if you want to classify a single beat then use the classify function and pass in the beat.
 
 
 if __name__ == '__main__':
